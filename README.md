@@ -53,28 +53,14 @@ Three analysis engines are available: **GitHub Copilot** (default, enterprise GH
 Requires a GitHub PAT with the `copilot` scope.
 
 ```bash
-export GITHUB_TOKEN=ghp_yourtoken
-
-mvn spring-boot:run
+GITHUB_TOKEN=ghp_yourtoken mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8083
 ```
 
-Open `http://localhost:8080`.
+Open `http://localhost:8083`.
 
 ---
 
-### Engine 2 — Anthropic Claude
-
-```bash
-export ANALYSIS_ENGINE=CLAUDE
-export ANTHROPIC_API_KEY=sk-ant-...
-export GITHUB_TOKEN=ghp_yourtoken
-
-mvn spring-boot:run
-```
-
----
-
-### Engine 3 — Static / offline (no LLM)
+### Engine 2 — Static / offline (no LLM)
 
 Uses JavaParser AST only. No AI API key required. Still needs a GitHub token to fetch source files.
 
