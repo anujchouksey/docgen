@@ -141,7 +141,7 @@ class CoverageComparisonAgentTest {
                 javaFile("src/main/java/OrderRepository.java", "class OrderRepository{}")
         );
         when(llmClient.runAgentWithJsonOutput(anyString(), anyString(),
-                stringThat(ctx -> ctx.contains("OrderService") && !ctx.contains("OrderController")),
+                argThat((String ctx) -> ctx.contains("OrderService") && !ctx.contains("OrderController")),
                 any())).thenReturn(wrapper(List.of()));
         when(llmClient.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
 
@@ -149,7 +149,7 @@ class CoverageComparisonAgentTest {
                 "main", "main", "job-5", "SERVICE");
 
         verify(llmClient).runAgentWithJsonOutput(anyString(), anyString(),
-                stringThat(ctx -> ctx.contains("OrderService.java") && !ctx.contains("OrderController.java")),
+                argThat((String ctx) -> ctx.contains("OrderService.java") && !ctx.contains("OrderController.java")),
                 any());
     }
 

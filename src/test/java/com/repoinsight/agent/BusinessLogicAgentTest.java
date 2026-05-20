@@ -86,7 +86,7 @@ class BusinessLogicAgentTest {
         agent.analyse(files);
 
         verify(llmClient).runAgentWithJsonOutput(anyString(), anyString(),
-                stringThat(ctx -> ctx.contains("OrderService.java")), any());
+                argThat((String ctx) -> ctx.contains("OrderService.java")), any());
     }
 
     private BusinessLogicAgent.FlowsWrapper buildWrapper() {

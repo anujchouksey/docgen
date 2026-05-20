@@ -88,7 +88,7 @@ class GherkinAgentTest {
 
         verify(llmClient).runAgent(
                 anyString(),
-                stringThat(prompt -> prompt.contains("DB") && prompt.contains("KAFKA")),
+                argThat((String prompt) -> prompt.contains("DB") && prompt.contains("KAFKA")),
                 anyString()
         );
     }
