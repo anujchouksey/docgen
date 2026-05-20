@@ -20,7 +20,7 @@ import static org.mockito.Mockito.*;
 class GherkinAgentTest {
 
     @Mock
-    private LlmClient claude;
+    private LlmClient llmClient;
 
     @InjectMocks
     private GherkinAgent agent;
@@ -48,13 +48,13 @@ class GherkinAgentTest {
         List<String> result = agent.generateFeatures(List.of(), List.of(DB));
 
         assertThat(result).isEmpty();
-        verifyNoInteractions(claude);
+        verifyNoInteractions(llmClient);
     }
 
     @Test
     @DisplayName("One flow produces one feature file")
     void generateFeatures_oneFlow_oneFeature() {
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("Feature: PlaceOrderFlow\n\n  Scenario: ...");
 
         List<String> result = agent.generateFeatures(List.of(ORDER_FLOW), List.of(DB));
@@ -70,23 +70,23 @@ class GherkinAgentTest {
                 .name("CancelOrderFlow").trigger("DELETE /api/orders/{id}").description("d")
                 .steps(List.of()).invariants(List.of()).sideEffects(List.of()).build();
 
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("Feature: SomeFlow\n\n  Scenario: placeholder");
 
         agent.generateFeatures(List.of(ORDER_FLOW, flow2), List.of(DB, KAFKA));
 
-        verify(claude, times(2)).runAgent(anyString(), anyString(), anyString());
+        verify(llmClient, times(2)).runAgent(anyString(), anyString(), anyString());
     }
 
     @Test
     @DisplayName("User prompt includes integration point categories")
     void generateFeatures_userPromptContainsIntegrations() {
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("Feature: PlaceOrderFlow");
 
         agent.generateFeatures(List.of(ORDER_FLOW), List.of(DB, KAFKA));
 
-        verify(claude).runAgent(
+        verify(llmClient).runAgent(
                 anyString(),
                 stringThat(prompt -> prompt.contains("DB") && prompt.contains("KAFKA")),
                 anyString()
@@ -96,7 +96,7 @@ class GherkinAgentTest {
     @Test
     @DisplayName("Claude exception propagates for the failing flow")
     void generateFeatures_claudeThrows_propagates() {
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenThrow(new IllegalStateException("Claude timeout"));
 
         assertThatThrownBy(() -> agent.generateFeatures(List.of(ORDER_FLOW), List.of()))
@@ -111,11 +111,11 @@ class GherkinAgentTest {
                 .name("HealthCheckFlow").trigger("GET /health").description("simple")
                 .steps(List.of()).invariants(List.of()).sideEffects(List.of()).build();
 
-        when(claude.runAgent(anyString(), anyString(), anyString())).thenReturn("Feature: HealthCheckFlow");
+        when(llmClient.runAgent(anyString(), anyString(), anyString())).thenReturn("Feature: HealthCheckFlow");
 
         List<String> result = agent.generateFeatures(List.of(simpleFlow), List.of());
 
         assertThat(result).hasSize(1);
-        verify(claude, times(1)).runAgent(anyString(), anyString(), anyString());
+        verify(llmClient, times(1)).runAgent(anyString(), anyString(), anyString());
     }
 }

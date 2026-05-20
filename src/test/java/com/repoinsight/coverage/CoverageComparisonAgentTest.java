@@ -24,7 +24,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CoverageComparisonAgentTest {
 
-    @Mock private LlmClient claude;
+    @Mock private LlmClient llmClient;
     @Mock private ObjectMapper objectMapper;
 
     @InjectMocks private CoverageComparisonAgent agent;
@@ -49,9 +49,9 @@ class CoverageComparisonAgentTest {
     @Test
     @DisplayName("Empty dev files returns report with empty classes list")
     void compare_emptyDevFiles_emptyClasses() {
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
                 .thenReturn(wrapper(List.of()));
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("Coverage score is 0%.");
 
         CoverageReport report = agent.compare(List.of(), qaFiles,
@@ -72,9 +72,9 @@ class CoverageComparisonAgentTest {
                 .missingScenarios(List.of("create order happy path"))
                 .relevantQaFiles(List.of()).build();
 
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
                 .thenReturn(wrapper(List.of(orderSvc)));
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("No QA tests found. Coverage is 0%.");
 
         CoverageReport report = agent.compare(devFiles, List.of(),
@@ -97,9 +97,9 @@ class CoverageComparisonAgentTest {
                 .status(CoverageStatus.NOT_NEEDED).coveredMethods(List.of())
                 .missedMethods(List.of()).missingScenarios(List.of()).relevantQaFiles(List.of()).build();
 
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
                 .thenReturn(wrapper(List.of(covered, notNeeded)));
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("Excellent coverage.");
 
         CoverageReport report = agent.compare(devFiles, qaFiles,
@@ -120,9 +120,9 @@ class CoverageComparisonAgentTest {
                 cls("D", CoverageStatus.MISSED),
                 cls("E", CoverageStatus.NOT_NEEDED)
         );
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
                 .thenReturn(wrapper(classes));
-        when(claude.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
+        when(llmClient.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
 
         CoverageReport report = agent.compare(devFiles, qaFiles,
                 "https://github.com/o/dev", "https://github.com/o/qa",
@@ -140,15 +140,15 @@ class CoverageComparisonAgentTest {
                 javaFile("src/main/java/OrderController.java", "class OrderController{}"),
                 javaFile("src/main/java/OrderRepository.java", "class OrderRepository{}")
         );
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(),
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(),
                 stringThat(ctx -> ctx.contains("OrderService") && !ctx.contains("OrderController")),
                 any())).thenReturn(wrapper(List.of()));
-        when(claude.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
+        when(llmClient.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
 
         agent.compare(mixed, qaFiles, "https://github.com/o/dev", "https://github.com/o/qa",
                 "main", "main", "job-5", "SERVICE");
 
-        verify(claude).runAgentWithJsonOutput(anyString(), anyString(),
+        verify(llmClient).runAgentWithJsonOutput(anyString(), anyString(),
                 stringThat(ctx -> ctx.contains("OrderService.java") && !ctx.contains("OrderController.java")),
                 any());
     }
@@ -159,23 +159,23 @@ class CoverageComparisonAgentTest {
         List<GitHubFile> sixtyFiles = java.util.stream.IntStream.rangeClosed(1, 60)
                 .mapToObj(i -> javaFile("Service" + i + ".java", "class Service" + i + " {}"))
                 .toList();
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
                 .thenReturn(wrapper(List.of()));
-        when(claude.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
+        when(llmClient.runAgent(anyString(), anyString(), anyString())).thenReturn("Summary.");
 
         agent.compare(sixtyFiles, qaFiles, "https://github.com/o/dev", "https://github.com/o/qa",
                 "main", "main", "job-6", "ALL");
 
         // 60 files / 20 per batch = 3 batch calls + 1 executive summary call
-        verify(claude, times(3)).runAgentWithJsonOutput(anyString(), anyString(), anyString(), any());
+        verify(llmClient, times(3)).runAgentWithJsonOutput(anyString(), anyString(), anyString(), any());
     }
 
     @Test
     @DisplayName("Executive summary is always generated even when classes list is empty")
     void compare_emptyResult_executiveSummaryStillGenerated() {
-        when(claude.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
+        when(llmClient.runAgentWithJsonOutput(anyString(), anyString(), anyString(), any()))
                 .thenReturn(wrapper(List.of()));
-        when(claude.runAgent(anyString(), anyString(), anyString()))
+        when(llmClient.runAgent(anyString(), anyString(), anyString()))
                 .thenReturn("No classes analysed.");
 
         CoverageReport report = agent.compare(devFiles, qaFiles,
