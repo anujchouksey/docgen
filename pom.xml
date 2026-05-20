@@ -22,7 +22,6 @@
         <!-- Encoding — applied to source compilation and resource filtering on all OSes -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <anthropic-sdk.version>1.1.0</anthropic-sdk.version>
         <testcontainers.version>1.20.1</testcontainers.version>
         <cucumber.version>7.18.1</cucumber.version>
         <javaparser.version>3.25.8</javaparser.version>
@@ -57,13 +56,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-
-        <!-- Anthropic Claude SDK -->
-        <dependency>
-            <groupId>com.anthropic</groupId>
-            <artifactId>anthropic-java</artifactId>
-            <version>${anthropic-sdk.version}</version>
         </dependency>
 
         <!-- Database -->

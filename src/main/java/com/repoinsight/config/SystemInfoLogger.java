@@ -17,9 +17,6 @@ import java.nio.file.Path;
 @Slf4j
 public class SystemInfoLogger {
 
-    @Value("${analysis.engine:COPILOT}")
-    private String analysisEngine;
-
     @Value("${analysis.output-dir}")
     private String outputDir;
 
@@ -42,10 +39,7 @@ public class SystemInfoLogger {
                 Charset.defaultCharset().name());
         log.info(" Temp dir        : {}", System.getProperty("java.io.tmpdir"));
         log.info(" Output dir      : {}", Path.of(outputDir).toAbsolutePath());
-        log.info(" Analysis engine : {}", analysisEngine);
-        if ("COPILOT".equalsIgnoreCase(analysisEngine)) {
-            log.info(" Copilot model   : {}", copilotModel);
-        }
+        log.info(" Copilot model   : {}", copilotModel);
         log.info(" Working dir     : {}", System.getProperty("user.dir"));
         log.info("═══════════════════════════════════════════════════════");
 

@@ -2,7 +2,7 @@ package com.repoinsight.agent;
 
 import com.repoinsight.analyzer.model.BusinessFlow;
 import com.repoinsight.analyzer.model.IntegrationPoint;
-import com.repoinsight.claude.ClaudeAgentClient;
+import com.repoinsight.llm.LlmClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,7 +20,7 @@ import static org.mockito.Mockito.*;
 class GherkinAgentTest {
 
     @Mock
-    private ClaudeAgentClient claude;
+    private LlmClient claude;
 
     @InjectMocks
     private GherkinAgent agent;

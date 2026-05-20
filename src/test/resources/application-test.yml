@@ -13,10 +13,6 @@ spring:
       name: testuser
       password: testpass
 
-anthropic:
-  api-key: test-key
-  prompt-cache-enabled: false   # disable caching in tests
-
 github:
   token: test-github-token
 

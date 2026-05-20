@@ -1,8 +1,8 @@
 package com.repoinsight.agent;
 
 import com.repoinsight.analyzer.model.BusinessFlow;
-import com.repoinsight.claude.ClaudeAgentClient;
 import com.repoinsight.github.model.GitHubFile;
+import com.repoinsight.llm.LlmClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ import static org.mockito.Mockito.*;
 class BusinessLogicAgentTest {
 
     @Mock
-    private ClaudeAgentClient claude;
+    private LlmClient claude;
 
     @InjectMocks
     private BusinessLogicAgent agent;

@@ -1,8 +1,8 @@
 package com.repoinsight.coverage;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.repoinsight.claude.ClaudeAgentClient;
 import com.repoinsight.coverage.agent.CoverageComparisonAgent;
+import com.repoinsight.llm.LlmClient;
 import com.repoinsight.coverage.model.ClassCoverageReport;
 import com.repoinsight.coverage.model.CoverageReport;
 import com.repoinsight.coverage.model.CoverageStatus;
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CoverageComparisonAgentTest {
 
-    @Mock private ClaudeAgentClient claude;
+    @Mock private LlmClient claude;
     @Mock private ObjectMapper objectMapper;
 
     @InjectMocks private CoverageComparisonAgent agent;

@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
 
 /**
- * Full-stack integration test: real Spring context, H2 DB, mocked GitHub + Anthropic.
+ * Full-stack integration test: real Spring context, H2 DB, mocked GitHub + Copilot endpoints.
  * Verifies the complete analysis pipeline end-to-end.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -30,22 +30,26 @@ import static org.awaitility.Awaitility.await;
 class RepoDocIntegrationTest {
 
     static MockWebServer mockGitHub = new MockWebServer();
-    static MockWebServer mockAnthropic = new MockWebServer();
+    static MockWebServer mockCopilotToken = new MockWebServer();
+    static MockWebServer mockCopilotCompletions = new MockWebServer();
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) throws IOException {
         mockGitHub.start();
-        mockAnthropic.start();
+        mockCopilotToken.start();
+        mockCopilotCompletions.start();
         registry.add("github.api-base-url", () -> "http://localhost:" + mockGitHub.getPort());
-        registry.add("anthropic.api-key", () -> "test-key");
-        // Override Anthropic base URL via env; SDK picks it up
-        registry.add("ANTHROPIC_BASE_URL", () -> "http://localhost:" + mockAnthropic.getPort());
+        registry.add("github.copilot.token-exchange-url",
+                () -> "http://localhost:" + mockCopilotToken.getPort());
+        registry.add("github.copilot.completions-url",
+                () -> "http://localhost:" + mockCopilotCompletions.getPort());
     }
 
     @AfterAll
     static void tearDown() throws IOException {
         mockGitHub.shutdown();
-        mockAnthropic.shutdown();
+        mockCopilotToken.shutdown();
+        mockCopilotCompletions.shutdown();
     }
 
     @Autowired
@@ -57,10 +61,13 @@ class RepoDocIntegrationTest {
     @Test
     @DisplayName("End-to-end: submit → poll → all artifacts returned")
     void fullPipeline_happyPath() {
+        stubCopilotToken();
         stubGitHub();
-        stubAnthropic();
+        stubCopilotCompletion("{\"flows\":[{\"name\":\"CreateOrder\",\"trigger\":\"POST /orders\",\"description\":\"Places order\",\"steps\":[\"validate\"],\"invariants\":[\"cart not empty\"],\"sideEffects\":[\"event emitted\"]}]}");
+        stubCopilotCompletion("{\"trees\":[{\"className\":\"OrderController\",\"methodSignature\":\"create()\",\"layer\":\"CONTROLLER\",\"integrationKind\":\"NONE\",\"depth\":0,\"children\":[]}]}");
+        stubCopilotCompletion("{\"integrations\":[{\"category\":\"DB\",\"name\":\"PostgreSQL\",\"classRef\":\"OrderRepo\",\"methodRef\":\"save\",\"detectionPattern\":\"@Repository\",\"direction\":\"WRITE\"}]}");
+        stubCopilotCompletion("Feature: CreateOrder\n\n  Scenario: Happy path\n    Given ...\n    When ...\n    Then ...");
 
-        // Submit analysis
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         String body = """
@@ -73,14 +80,12 @@ class RepoDocIntegrationTest {
         String jobId = (String) submitResponse.getBody().get("jobId");
         assertThat(jobId).isNotBlank();
 
-        // Poll until completed
         await().atMost(30, TimeUnit.SECONDS).pollInterval(1, TimeUnit.SECONDS).until(() -> {
             ResponseEntity<Map> poll = restTemplate.getForEntity("/api/v1/jobs/" + jobId, Map.class);
             return "COMPLETED".equals(poll.getBody().get("status"))
                     || "FAILED".equals(poll.getBody().get("status"));
         });
 
-        // Verify final state
         AnalysisJob job = jobRepository.findById(jobId).orElseThrow();
         assertThat(job.getStatus()).isEqualTo(AnalysisJob.JobStatus.COMPLETED);
         assertThat(job.getBusinessLogicDoc()).isNotBlank();
@@ -92,6 +97,7 @@ class RepoDocIntegrationTest {
     @Test
     @DisplayName("GitHub 404 → job fails with descriptive error")
     void githubNotFound_jobFails() {
+        stubCopilotToken();
         mockGitHub.enqueue(new MockResponse().setResponseCode(404).setBody("{\"message\":\"Not Found\"}"));
 
         String body = """
@@ -116,6 +122,14 @@ class RepoDocIntegrationTest {
 
     // ── Stubs ────────────────────────────────────────────────────────────────
 
+    private void stubCopilotToken() {
+        mockCopilotToken.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"token\":\"test-session-token\",\"expires_at\":%d}"
+                        .formatted(System.currentTimeMillis() / 1000 + 3600)));
+    }
+
     private void stubGitHub() {
         String treeJson = """
                 {"tree":[
@@ -135,33 +149,24 @@ class RepoDocIntegrationTest {
                 .setBody("{\"content\":\"%s\"}".formatted(encoded)));
     }
 
-    private void stubAnthropic() {
-        String flows = anthropicResponse("{\"flows\":[{\"name\":\"CreateOrder\",\"trigger\":\"POST /orders\",\"description\":\"Places order\",\"steps\":[\"validate\"],\"invariants\":[\"cart not empty\"],\"sideEffects\":[\"event emitted\"]}]}");
-        String trees = anthropicResponse("{\"trees\":[{\"className\":\"OrderController\",\"methodSignature\":\"create()\",\"layer\":\"CONTROLLER\",\"integrationKind\":\"NONE\",\"depth\":0,\"children\":[]}]}");
-        String integrations = anthropicResponse("{\"integrations\":[{\"category\":\"DB\",\"name\":\"PostgreSQL\",\"classRef\":\"OrderRepo\",\"methodRef\":\"save\",\"detectionPattern\":\"@Repository\",\"direction\":\"WRITE\"}]}");
-        String gherkin = anthropicResponse("Feature: CreateOrder\n\n  Scenario: Happy path\n    Given ...\n    When ...\n    Then ...");
-
-        mockAnthropic.enqueue(new MockResponse().setResponseCode(200)
-                .setHeader("Content-Type", "application/json").setBody(flows));
-        mockAnthropic.enqueue(new MockResponse().setResponseCode(200)
-                .setHeader("Content-Type", "application/json").setBody(trees));
-        mockAnthropic.enqueue(new MockResponse().setResponseCode(200)
-                .setHeader("Content-Type", "application/json").setBody(integrations));
-        mockAnthropic.enqueue(new MockResponse().setResponseCode(200)
-                .setHeader("Content-Type", "application/json").setBody(gherkin));
-    }
-
-    private String anthropicResponse(String text) {
-        return """
+    private void stubCopilotCompletion(String text) {
+        String escaped = text.replace("\"", "\\\"").replace("\n", "\\n");
+        String response = """
                 {
-                  "id": "msg_test",
-                  "type": "message",
-                  "role": "assistant",
-                  "content": [{"type": "text", "text": "%s"}],
-                  "model": "claude-sonnet-4-6",
-                  "stop_reason": "end_turn",
-                  "usage": {"input_tokens": 100, "output_tokens": 200}
+                  "id": "chatcmpl-test",
+                  "object": "chat.completion",
+                  "model": "gpt-4o",
+                  "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "%s" },
+                    "finish_reason": "stop"
+                  }],
+                  "usage": { "prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300 }
                 }
-                """.formatted(text.replace("\"", "\\\"").replace("\n", "\\n"));
+                """.formatted(escaped);
+        mockCopilotCompletions.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(response));
     }
 }

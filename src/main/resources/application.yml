@@ -31,10 +31,8 @@ server:
   port: 8080
   shutdown: graceful
 
-# ── Analysis engine ──────────────────────────────────────────────────────────
-# COPILOT (default) — GitHub Copilot Chat API (enterprise-ready)
-# CLAUDE             — Anthropic Claude (requires ANTHROPIC_API_KEY)
-# STATIC             — No LLM; JavaParser AST only (works offline)
+# ── Analysis ─────────────────────────────────────────────────────────────────
+# STATIC mode: set ANALYSIS_ENGINE=STATIC to use JavaParser AST only (offline)
 analysis:
   engine: ${ANALYSIS_ENGINE:COPILOT}
   max-depth: ${MAX_DEPTH:5}
@@ -74,14 +72,6 @@ github:
     model: ${COPILOT_MODEL:gpt-4o}
     max-tokens: ${COPILOT_MAX_TOKENS:4096}
     timeout-seconds: 120
-
-# ── Claude (optional fallback, active only when analysis.engine=CLAUDE) ──────
-anthropic:
-  api-key: ${ANTHROPIC_API_KEY:}
-  model: claude-sonnet-4-6
-  max-tokens: 8192
-  timeout-seconds: 120
-  prompt-cache-enabled: true
 
 management:
   endpoints:

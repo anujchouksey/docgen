@@ -11,7 +11,7 @@ import java.util.List;
 
 /**
  * Static-mode orchestrator. Equivalent to RepoAnalysisOrchestrator but uses
- * JavaParser AST analysis instead of Claude AI — works offline, no API key needed.
+ * JavaParser AST analysis instead of an LLM — works offline, no API key needed.
  */
 @Component
 @RequiredArgsConstructor

@@ -1,8 +1,8 @@
 package com.repoinsight.llm;
 
 /**
- * Abstraction over any LLM backend (GitHub Copilot, Claude, etc.).
- * All agents depend on this interface — swap the implementation via Spring beans.
+ * LLM backend contract. All agents depend on this interface.
+ * Active implementation: {@link GitHubCopilotClient}.
  */
 public interface LlmClient {
 

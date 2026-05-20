@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -36,7 +35,6 @@ import java.util.concurrent.locks.ReentrantLock;
  *  COPILOT_MODEL           — default gpt-4o (optional)
  */
 @Component
-@ConditionalOnProperty(name = "analysis.engine", havingValue = "COPILOT", matchIfMissing = true)
 @Slf4j
 public class GitHubCopilotClient implements LlmClient {
 
