@@ -45,7 +45,7 @@ Three analysis engines are available: **GitHub Copilot** (default, enterprise GH
 ### Prerequisites
 
 - Java 21+
-- Maven 3.9+ (or use the included `./mvnw` wrapper)
+- Maven 3.9+ (or use the included `mvn` wrapper)
 - A GitHub Personal Access Token
 
 ### Engine 1 — GitHub Copilot (default)
@@ -55,7 +55,7 @@ Requires a GitHub PAT with the `copilot` scope.
 ```bash
 export GITHUB_TOKEN=ghp_yourtoken
 
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
 Open `http://localhost:8080`.
@@ -69,7 +69,7 @@ export ANALYSIS_ENGINE=CLAUDE
 export ANTHROPIC_API_KEY=sk-ant-...
 export GITHUB_TOKEN=ghp_yourtoken
 
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
 ---
@@ -82,7 +82,7 @@ Uses JavaParser AST only. No AI API key required. Still needs a GitHub token to 
 export ANALYSIS_ENGINE=STATIC
 export GITHUB_TOKEN=ghp_yourtoken
 
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
 ---
@@ -109,7 +109,7 @@ Override the Copilot token exchange URL to point at your GHES instance:
 export COPILOT_TOKEN_URL=https://github.mycompany.com/api/v3/copilot_internal/v2/token
 export GITHUB_TOKEN=ghp_yourenterprisetoken
 
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
 The completions endpoint (`COPILOT_COMPLETIONS_URL`) typically stays as the default `https://api.githubcopilot.com/chat/completions` even for GHES, but it is also overridable.
@@ -308,7 +308,7 @@ The score formula excludes `NOT_NEEDED` classes (DTOs, `@Configuration`, simple 
 ### Build
 
 ```bash
-./mvnw clean package -DskipTests
+mvn clean package -DskipTests
 
 java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 \
      --enable-preview \
@@ -436,10 +436,10 @@ src/
 
 ```bash
 # Run unit tests (H2 in-memory, no Docker required)
-./mvnw test
+mvn test
 
 # Full verify including integration tests (requires Docker for Testcontainers)
-./mvnw verify
+mvn verify
 ```
 
 Test coverage includes:

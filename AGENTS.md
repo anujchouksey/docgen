@@ -253,18 +253,18 @@ Do not use `new String(bytes)` without an explicit charset anywhere in this code
 ```bash
 # Run (Copilot engine — requires GITHUB_TOKEN with copilot scope)
 export GITHUB_TOKEN=ghp_...
-./mvnw spring-boot:run
+mvn spring-boot:run
 
 # Run (STATIC engine — no LLM needed)
 export GITHUB_TOKEN=ghp_...   # still needed to fetch source from GitHub
 export ANALYSIS_ENGINE=STATIC  # passed as analysisMode in request body
-./mvnw spring-boot:run
+mvn spring-boot:run
 
 # Unit tests only (no Docker, no network)
-./mvnw test
+mvn test
 
 # Full build
-./mvnw clean package -DskipTests
+mvn clean package -DskipTests
 java -Dfile.encoding=UTF-8 --enable-preview -jar target/repo-doc-gen-1.0.0-SNAPSHOT.jar
 ```
 
