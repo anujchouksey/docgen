@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  security:
+    user:
+      name: testuser
+      password: testpass
+
+anthropic:
+  api-key: test-key
+  prompt-cache-enabled: false   # disable caching in tests
+
+github:
+  token: test-github-token
+
+analysis:
+  cache-ttl-minutes: 1
+  output-dir: ./build/test-output
+
+logging:
+  level:
+    com.repoinsight: DEBUG

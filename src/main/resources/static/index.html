@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RepoDocGen — Documentation & Coverage Intelligence</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    [x-cloak]{display:none!important}
+    .gradient-bg{background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)}
+    .card-glow{box-shadow:0 0 0 1px rgba(139,92,246,.15),0 4px 24px rgba(139,92,246,.08)}
+    .card-glow:hover{box-shadow:0 0 0 1px rgba(139,92,246,.3),0 8px 40px rgba(139,92,246,.15)}
+    .badge-covered{background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3)}
+    .badge-partial{background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3)}
+    .badge-missed{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)}
+    .badge-not-needed{background:rgba(100,116,139,.15);color:#94a3b8;border:1px solid rgba(100,116,139,.3)}
+    .progress-bar{transition:width 1.2s cubic-bezier(.4,0,.2,1)}
+    .markdown-body h1,.markdown-body h2,.markdown-body h3{color:#c4b5fd;font-weight:700;margin:1rem 0 .5rem}
+    .markdown-body h1{font-size:1.4rem}.markdown-body h2{font-size:1.2rem;border-bottom:1px solid rgba(139,92,246,.2);padding-bottom:.3rem}
+    .markdown-body p{color:#cbd5e1;line-height:1.7;margin:.5rem 0}
+    .markdown-body code{background:rgba(139,92,246,.15);color:#a78bfa;padding:.1rem .3rem;border-radius:.25rem;font-size:.85em}
+    .markdown-body pre{background:#1e293b;border:1px solid rgba(139,92,246,.2);border-radius:.5rem;padding:1rem;overflow-x:auto;margin:.75rem 0}
+    .markdown-body pre code{background:none;color:#e2e8f0;padding:0}
+    .markdown-body ul,.markdown-body ol{color:#cbd5e1;margin:.5rem 0;padding-left:1.5rem}
+    .markdown-body li{margin:.2rem 0;line-height:1.6}
+    .markdown-body table{width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.875rem}
+    .markdown-body th{background:rgba(139,92,246,.15);color:#c4b5fd;padding:.5rem .75rem;text-align:left;border:1px solid rgba(139,92,246,.2)}
+    .markdown-body td{color:#cbd5e1;padding:.5rem .75rem;border:1px solid rgba(30,41,59,1)}
+    .markdown-body tr:nth-child(even) td{background:rgba(30,41,59,.5)}
+    .markdown-body hr{border:none;border-top:1px solid rgba(139,92,246,.2);margin:1rem 0}
+    .pulse-ring{animation:pulse-ring 2s cubic-bezier(.4,0,.6,1) infinite}
+    @keyframes pulse-ring{0%,100%{opacity:1}50%{opacity:.4}}
+    .tab-active{background:rgba(139,92,246,.2);color:#c4b5fd;border-bottom:2px solid #8b5cf6}
+    .tab-inactive{color:#64748b;border-bottom:2px solid transparent}
+    .tab-inactive:hover{color:#94a3b8;background:rgba(30,41,59,.5)}
+    .class-row:hover{background:rgba(139,92,246,.05)}
+    .spinner{animation:spin 1s linear infinite}
+    @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+    .fade-in{animation:fadeIn .4s ease-in}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .tooltip{position:relative}
+    .tooltip:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid rgba(139,92,246,.3);color:#e2e8f0;font-size:.75rem;padding:.3rem .6rem;border-radius:.375rem;white-space:nowrap;z-index:50;pointer-events:none}
+  </style>
+  <script>
+    tailwind.config = {
+      theme:{
+        extend:{
+          colors:{
+            brand:{50:'#f5f3ff',500:'#8b5cf6',600:'#7c3aed',700:'#6d28d9',900:'#1e1b4b'},
+            surface:{'900':'#0f172a','800':'#1e293b','700':'#334155','600':'#475569'}
+          }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="gradient-bg min-h-full text-slate-200 font-sans antialiased" x-data="app()" x-init="init()">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header class="border-b border-slate-800/60 backdrop-blur-sm sticky top-0 z-40 bg-slate-900/80">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+        </div>
+        <div>
+          <span class="font-bold text-white text-lg tracking-tight">RepoDocGen</span>
+        </div>
+      </div>
+      <nav class="flex items-center gap-1">
+        <button @click="activeTab='analyser'"
+          :class="activeTab==='analyser' ? 'bg-violet-500/10 text-violet-300 border-violet-500/30' : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-800'"
+          class="px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-150 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          Repo Analyser
+        </button>
+        <button @click="activeTab='coverage'"
+          :class="activeTab==='coverage' ? 'bg-violet-500/10 text-violet-300 border-violet-500/30' : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-800'"
+          class="px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-150 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          Coverage Comparator
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-10">
+
+    <!-- ══ TAB 1: REPO ANALYSER ══════════════════════════════════════════ -->
+    <div x-show="activeTab==='analyser'" x-cloak class="fade-in">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white mb-2">Repository Analyser</h1>
+        <p class="text-slate-400 max-w-2xl">Give any Java GitHub repo — get back full business logic documentation, method call hierarchies, integration topology, and a complete Gherkin test suite.</p>
+      </div>
+
+      <!-- Form card -->
+      <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 p-6 mb-8 backdrop-blur-sm">
+        <h2 class="text-lg font-semibold text-slate-200 mb-5 flex items-center gap-2">
+          <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+          </svg>
+          Repository Details
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">GitHub Repository URL <span class="text-violet-400">*</span></label>
+            <input x-model="analyser.repoUrl" type="url" placeholder="https://github.com/your-org/your-service"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm"/>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Branch</label>
+            <input x-model="analyser.branch" type="text" placeholder="main"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm"/>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">GitHub Token <span class="text-slate-500 font-normal">(private repos)</span></label>
+            <input x-model="analyser.token" type="password" placeholder="ghp_..."
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm font-mono"/>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Max Call Depth</label>
+            <select x-model="analyser.maxDepth"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm">
+              <option value="3">3 levels</option>
+              <option value="5" selected>5 levels (recommended)</option>
+              <option value="7">7 levels</option>
+              <option value="10">10 levels (deep)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Output Format</label>
+            <select x-model="analyser.outputFormat"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm">
+              <option value="MARKDOWN">Markdown</option>
+              <option value="JSON">JSON</option>
+              <option value="BOTH">Both</option>
+            </select>
+          </div>
+        </div>
+        <!-- Mode toggle -->
+        <div class="flex items-center gap-3 mb-5">
+          <span class="text-sm font-medium text-slate-400">Analysis Engine:</span>
+          <div class="flex rounded-xl border border-slate-700/50 overflow-hidden bg-slate-900/50 p-0.5 gap-0.5">
+            <button @click="analyser.mode='AI'"
+              :class="analyser.mode==='AI'
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
+              GitHub Copilot
+            </button>
+            <button @click="analyser.mode='STATIC'"
+              :class="analyser.mode==='STATIC'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+              </svg>
+              Static (AST)
+            </button>
+          </div>
+          <div class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-all duration-200"
+            :class="analyser.mode==='AI'
+              ? 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'">
+            <span x-show="analyser.mode==='AI'">Requires <code class="font-mono">GITHUB_TOKEN</code> with copilot scope · Enterprise GHES supported</span>
+            <span x-show="analyser.mode==='STATIC'">No API key needed · Works offline · JavaParser AST</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+        <button @click="submitAnalysis()"
+          :disabled="analyser.loading || !analyser.repoUrl.trim()"
+          class="px-6 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-200 flex items-center gap-2 shadow-lg shadow-violet-900/30"
+          :class="analyser.mode==='STATIC' ? '!from-emerald-600 !to-teal-600 hover:!from-emerald-500 hover:!to-teal-500' : ''">
+          <svg x-show="analyser.loading" class="spinner w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <svg x-show="!analyser.loading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <span x-text="analyser.loading ? 'Analysing...' : 'Analyse Repository'"></span>
+        </button>
+        <span class="text-xs px-2.5 py-1.5 rounded-lg font-semibold border"
+          :class="analyser.mode==='AI'
+            ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'"
+          x-text="analyser.mode==='AI' ? '✦ Copilot Mode' : '⟨/⟩ Static Mode'"></span>
+        </div>
+      </div>
+
+      <!-- Progress / Status -->
+      <div x-show="analyser.jobId" x-cloak class="mb-6 fade-in">
+        <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 p-5 backdrop-blur-sm">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <div x-show="analyser.status==='RUNNING' || analyser.status==='QUEUED'" class="relative">
+                <div class="w-3 h-3 rounded-full bg-violet-500 pulse-ring"></div>
+              </div>
+              <div x-show="analyser.status==='COMPLETED'" class="w-3 h-3 rounded-full bg-emerald-400"></div>
+              <div x-show="analyser.status==='FAILED'" class="w-3 h-3 rounded-full bg-red-400"></div>
+              <span class="text-sm font-medium text-slate-300">
+                Job <code class="text-violet-400 font-mono text-xs" x-text="analyser.jobId?.slice(0,8)+'...'"></code>
+              </span>
+              <span class="text-xs px-2.5 py-1 rounded-full font-semibold"
+                :class="{
+                  'bg-violet-500/20 text-violet-300 border border-violet-500/30': ['QUEUED','RUNNING'].includes(analyser.status),
+                  'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30': analyser.status==='COMPLETED',
+                  'bg-red-500/20 text-red-300 border border-red-500/30': analyser.status==='FAILED'
+                }"
+                x-text="analyser.status"></span>
+              <!-- Engine badge -->
+              <span class="text-xs px-2 py-0.5 rounded font-medium border"
+                :class="analyser.mode==='STATIC'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-violet-500/10 text-violet-400 border-violet-500/20'"
+                x-text="analyser.mode==='STATIC' ? '⟨/⟩ AST' : '✦ Copilot'"></span>
+            </div>
+            <span x-show="analyser.stats.filesAnalysed" class="text-xs text-slate-500">
+              <span class="text-slate-300 font-medium" x-text="analyser.stats.filesAnalysed"></span> files · <span class="text-slate-300 font-medium" x-text="(analyser.stats.durationMs/1000).toFixed(1)+'s'"></span>
+            </span>
+          </div>
+          <div class="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full progress-bar"
+              :style="`width:${analyser.status==='COMPLETED'?100:analyser.status==='FAILED'?100:analyser.status==='RUNNING'?65:15}%`"></div>
+          </div>
+          <p x-show="analyser.status==='FAILED'" class="mt-2 text-sm text-red-400" x-text="analyser.error"></p>
+        </div>
+      </div>
+
+      <!-- Artifacts tabs -->
+      <div x-show="analyser.status==='COMPLETED'" x-cloak class="fade-in">
+        <div class="flex gap-1 mb-4 bg-slate-800/40 p-1 rounded-xl border border-slate-700/30 w-fit">
+          <template x-for="tab in ['business-logic','method-hierarchy','integrations','gherkin']">
+            <button @click="analyser.artifactTab=tab"
+              :class="analyser.artifactTab===tab ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+              class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 capitalize"
+              x-text="tab.replace(/-/g,' ')"></button>
+          </template>
+        </div>
+
+        <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 backdrop-blur-sm overflow-hidden">
+          <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700/50">
+            <span class="text-sm font-medium text-slate-300 capitalize" x-text="analyser.artifactTab?.replace(/-/g,' ')"></span>
+            <button @click="downloadArtifact(analyser.artifactTab)"
+              class="flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+              Download
+            </button>
+          </div>
+          <div class="p-6 max-h-[600px] overflow-y-auto">
+            <div x-show="analyser.artifactTab!=='gherkin'" class="markdown-body" x-html="analyser.renderedArtifacts[analyser.artifactTab] || ''"></div>
+            <div x-show="analyser.artifactTab==='gherkin'">
+              <template x-for="(feat,i) in analyser.gherkinFeatures" :key="i">
+                <div class="mb-4 rounded-xl border border-slate-700/50 overflow-hidden">
+                  <div class="px-4 py-2.5 bg-slate-900/60 border-b border-slate-700/50 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span class="text-xs font-medium text-slate-300" x-text="'Feature ' + (i+1)"></span>
+                  </div>
+                  <pre class="p-4 text-xs text-slate-300 overflow-x-auto bg-slate-900/40 leading-relaxed" x-text="feat"></pre>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ TAB 2: COVERAGE COMPARATOR ══════════════════════════════════ -->
+    <div x-show="activeTab==='coverage'" x-cloak class="fade-in">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white mb-2">Coverage Comparator</h1>
+        <p class="text-slate-400 max-w-2xl">Compare your dev repo against a QA test repo. Get a detailed coverage intelligence report — what's covered, what's missing, what's partially tested, and what needs no test.</p>
+      </div>
+
+      <!-- Input card -->
+      <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 p-6 mb-8 backdrop-blur-sm">
+        <h2 class="text-lg font-semibold text-slate-200 mb-5 flex items-center gap-2">
+          <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+          Repository Pair
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+          <!-- Dev repo -->
+          <div class="p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5">
+            <div class="flex items-center gap-2 mb-3">
+              <div class="w-6 h-6 rounded bg-indigo-500/20 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                </svg>
+              </div>
+              <span class="text-sm font-semibold text-indigo-300">Dev Repository</span>
+              <span class="text-xs text-indigo-400/60 bg-indigo-400/10 px-2 py-0.5 rounded-full">source code</span>
+            </div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">GitHub URL <span class="text-violet-400">*</span></label>
+            <input x-model="cov.devRepoUrl" type="url" placeholder="https://github.com/org/backend-service"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all text-sm mb-2"/>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Branch</label>
+            <input x-model="cov.devBranch" type="text" placeholder="main"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all text-sm"/>
+          </div>
+
+          <!-- QA repo -->
+          <div class="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+            <div class="flex items-center gap-2 mb-3">
+              <div class="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <span class="text-sm font-semibold text-emerald-300">QA Repository</span>
+              <span class="text-xs text-emerald-400/60 bg-emerald-400/10 px-2 py-0.5 rounded-full">test suite</span>
+            </div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">GitHub URL <span class="text-violet-400">*</span></label>
+            <input x-model="cov.qaRepoUrl" type="url" placeholder="https://github.com/org/qa-automation"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all text-sm mb-2"/>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Branch</label>
+            <input x-model="cov.qaBranch" type="text" placeholder="main"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all text-sm"/>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">GitHub Token</label>
+            <input x-model="cov.token" type="password" placeholder="ghp_... (for private repos)"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all text-sm font-mono"/>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Layer Focus</label>
+            <select x-model="cov.layerFocus"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500/50 text-sm">
+              <option value="ALL">All Layers</option>
+              <option value="SERVICE">Service Layer Only</option>
+              <option value="CONTROLLER">Controller Layer Only</option>
+              <option value="REPOSITORY">Repository Layer Only</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Report Format</label>
+            <select x-model="cov.reportFormat"
+              class="w-full bg-slate-900/70 border border-slate-600/50 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500/50 text-sm">
+              <option value="FULL">Full Report</option>
+              <option value="GAPS_ONLY">Gaps Only</option>
+              <option value="EXECUTIVE">Executive Summary</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Mode toggle -->
+        <div class="flex items-center gap-3 mb-5">
+          <span class="text-sm font-medium text-slate-400">Analysis Engine:</span>
+          <div class="flex rounded-xl border border-slate-700/50 overflow-hidden bg-slate-900/50 p-0.5 gap-0.5">
+            <button @click="cov.mode='AI'"
+              :class="cov.mode==='AI'
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
+              GitHub Copilot
+            </button>
+            <button @click="cov.mode='STATIC'"
+              :class="cov.mode==='STATIC'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+              </svg>
+              Static (AST)
+            </button>
+          </div>
+          <div class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-all duration-200"
+            :class="cov.mode==='AI'
+              ? 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'">
+            <span x-show="cov.mode==='AI'">Requires <code class="font-mono">GITHUB_TOKEN</code> · Semantic matching via GitHub Copilot</span>
+            <span x-show="cov.mode==='STATIC'">AST name matching · No API key · Instant results</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+        <button @click="submitCoverage()"
+          :disabled="cov.loading || !cov.devRepoUrl.trim() || !cov.qaRepoUrl.trim()"
+          class="px-6 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-200 flex items-center gap-2 shadow-lg shadow-violet-900/30"
+          :class="cov.mode==='STATIC' ? '!from-emerald-600 !to-teal-600 hover:!from-emerald-500 hover:!to-teal-500' : ''">
+          <svg x-show="cov.loading" class="spinner w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <svg x-show="!cov.loading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          <span x-text="cov.loading ? 'Comparing...' : 'Generate Coverage Report'"></span>
+        </button>
+        <span class="text-xs px-2.5 py-1.5 rounded-lg font-semibold border"
+          :class="cov.mode==='AI'
+            ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'"
+          x-text="cov.mode==='AI' ? '✦ Copilot Mode' : '⟨/⟩ Static Mode'"></span>
+        </div>
+      </div>
+
+      <!-- Coverage progress -->
+      <div x-show="cov.jobId && !cov.report" x-cloak class="mb-6 fade-in">
+        <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 p-5 backdrop-blur-sm">
+          <div class="flex items-center gap-3 mb-3">
+            <div x-show="['QUEUED','RUNNING'].includes(cov.status)" class="relative">
+              <div class="w-3 h-3 rounded-full bg-violet-500 pulse-ring"></div>
+            </div>
+            <span class="text-sm text-slate-300">
+              <span x-show="cov.status==='QUEUED'">Queued — waiting for analysis slot…</span>
+              <span x-show="cov.status==='RUNNING'" x-text="cov.mode==='STATIC' ? 'Fetching repos and running AST analysis…' : 'Fetching repos and running Copilot comparison…'"></span>
+              <span x-show="cov.status==='FAILED'" class="text-red-400" x-text="'Failed: ' + cov.error"></span>
+            </span>
+            <span class="ml-auto text-xs px-2 py-0.5 rounded font-medium border"
+              :class="cov.mode==='STATIC'
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : 'bg-violet-500/10 text-violet-400 border-violet-500/20'"
+              x-text="cov.mode==='STATIC' ? '⟨/⟩ AST' : '✦ Copilot'"></span>
+          </div>
+          <div class="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-emerald-500 to-violet-500 rounded-full progress-bar"
+              :style="`width:${cov.status==='RUNNING'?70:cov.status==='FAILED'?100:20}%`"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Coverage Report ──────────────────────────────────────────── -->
+      <div x-show="cov.report" x-cloak class="fade-in space-y-6">
+
+        <!-- Summary banner -->
+        <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 p-6 backdrop-blur-sm">
+          <div class="flex flex-col md:flex-row md:items-center gap-6">
+            <!-- Doughnut -->
+            <div class="flex-shrink-0 flex items-center justify-center">
+              <div class="relative w-36 h-36">
+                <canvas id="coverageChart" width="144" height="144"></canvas>
+                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                  <span class="text-2xl font-bold text-white" x-text="cov.report?.summary?.coverageScore + '%'"></span>
+                  <span class="text-xs text-slate-400">coverage</span>
+                </div>
+              </div>
+            </div>
+            <!-- Stats -->
+            <div class="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <template x-for="stat in coverageStats()" :key="stat.label">
+                <div class="p-3 rounded-xl" :class="stat.bg">
+                  <div class="text-2xl font-bold mb-0.5" :class="stat.color" x-text="stat.value"></div>
+                  <div class="text-xs font-medium text-slate-400" x-text="stat.label"></div>
+                </div>
+              </template>
+            </div>
+            <!-- Export -->
+            <div class="flex-shrink-0 flex flex-col gap-2">
+              <button @click="exportReport('json')"
+                class="px-4 py-2 text-sm rounded-xl bg-slate-700/60 hover:bg-slate-700 border border-slate-600/50 text-slate-300 transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Export JSON
+              </button>
+              <button @click="exportReport('markdown')"
+                class="px-4 py-2 text-sm rounded-xl bg-slate-700/60 hover:bg-slate-700 border border-slate-600/50 text-slate-300 transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                </svg>
+                Export MD
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-sm text-slate-400 mr-1">Filter:</span>
+          <template x-for="f in ['ALL','COVERED','PARTIAL','MISSED','NOT_NEEDED']" :key="f">
+            <button @click="cov.filter=f"
+              :class="cov.filter===f ? 'bg-violet-500/20 text-violet-300 border-violet-500/40' : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5">
+              <span x-show="f==='COVERED'" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span x-show="f==='PARTIAL'" class="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span x-show="f==='MISSED'" class="w-2 h-2 rounded-full bg-red-400"></span>
+              <span x-show="f==='NOT_NEEDED'" class="w-2 h-2 rounded-full bg-slate-500"></span>
+              <span x-text="f==='ALL' ? 'All classes' : f.replace('_',' ').toLowerCase()"></span>
+              <span class="opacity-60" x-text="'(' + classCount(f) + ')'"></span>
+            </button>
+          </template>
+          <div class="flex-1"></div>
+          <input x-model="cov.search" type="search" placeholder="Search classes…"
+            class="bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 w-52"/>
+        </div>
+
+        <!-- Class cards -->
+        <div class="space-y-3">
+          <template x-for="cls in filteredClasses()" :key="cls.devClass">
+            <div class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 backdrop-blur-sm overflow-hidden class-row transition-all">
+              <!-- Class header -->
+              <button class="w-full text-left px-6 py-4 flex items-center gap-4"
+                @click="cls._open = !cls._open">
+                <!-- Status indicator -->
+                <div class="flex-shrink-0">
+                  <div class="w-10 h-10 rounded-xl flex items-center justify-center"
+                    :class="{
+                      'bg-emerald-500/15 text-emerald-400': cls.status==='COVERED',
+                      'bg-amber-500/15 text-amber-400': cls.status==='PARTIAL',
+                      'bg-red-500/15 text-red-400': cls.status==='MISSED',
+                      'bg-slate-600/30 text-slate-400': cls.status==='NOT_NEEDED'
+                    }">
+                    <svg x-show="cls.status==='COVERED'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <svg x-show="cls.status==='PARTIAL'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <svg x-show="cls.status==='MISSED'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    <svg x-show="cls.status==='NOT_NEEDED'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                    </svg>
+                  </div>
+                </div>
+
+                <!-- Class info -->
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-0.5">
+                    <span class="font-semibold text-white text-sm" x-text="cls.devClass"></span>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-medium"
+                      :class="{
+                        'badge-covered': cls.status==='COVERED',
+                        'badge-partial': cls.status==='PARTIAL',
+                        'badge-missed': cls.status==='MISSED',
+                        'badge-not-needed': cls.status==='NOT_NEEDED'
+                      }"
+                      x-text="cls.status.replace('_',' ')"></span>
+                    <span class="text-xs text-slate-500 font-mono" x-text="cls.layer"></span>
+                  </div>
+                  <div class="text-xs text-slate-400 font-mono truncate" x-text="cls.devFile"></div>
+                </div>
+
+                <!-- Method bar -->
+                <div class="flex-shrink-0 w-32 hidden md:block">
+                  <div class="flex items-center justify-end gap-2 mb-1">
+                    <span class="text-xs text-slate-400"
+                      x-text="(cls.coveredMethods?.length||0) + '/' + ((cls.coveredMethods?.length||0)+(cls.missedMethods?.length||0)) + ' methods'"></span>
+                  </div>
+                  <div class="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-700"
+                      :class="cls.status==='COVERED' ? 'bg-emerald-400' : cls.status==='PARTIAL' ? 'bg-amber-400' : cls.status==='MISSED' ? 'bg-red-400' : 'bg-slate-500'"
+                      :style="`width:${methodCoverage(cls)}%`"></div>
+                  </div>
+                </div>
+
+                <!-- Chevron -->
+                <svg class="w-4 h-4 text-slate-500 flex-shrink-0 transition-transform duration-200"
+                  :class="cls._open ? 'rotate-180' : ''"
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </button>
+
+              <!-- Expanded detail -->
+              <div x-show="cls._open" x-collapse class="border-t border-slate-700/40">
+                <div class="px-6 py-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <!-- Left: coverage detail -->
+                  <div class="space-y-4">
+                    <!-- Covered methods -->
+                    <div x-show="cls.coveredMethods?.length">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+                        <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">Covered Methods</span>
+                      </div>
+                      <div class="space-y-1">
+                        <template x-for="m in cls.coveredMethods" :key="m">
+                          <div class="flex items-center gap-2 text-sm text-slate-300">
+                            <svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                            </svg>
+                            <code class="font-mono text-xs text-slate-300" x-text="m"></code>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Missed methods -->
+                    <div x-show="cls.missedMethods?.length">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full bg-red-400"></div>
+                        <span class="text-xs font-semibold text-red-400 uppercase tracking-wide">Missing Coverage</span>
+                      </div>
+                      <div class="space-y-1">
+                        <template x-for="m in cls.missedMethods" :key="m">
+                          <div class="flex items-center gap-2 text-sm">
+                            <svg class="w-3.5 h-3.5 text-red-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                            </svg>
+                            <code class="font-mono text-xs text-red-300" x-text="m"></code>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Missing scenarios -->
+                    <div x-show="cls.missingScenarios?.length">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full bg-amber-400"></div>
+                        <span class="text-xs font-semibold text-amber-400 uppercase tracking-wide">Missing Scenarios</span>
+                      </div>
+                      <ul class="space-y-1">
+                        <template x-for="s in cls.missingScenarios" :key="s">
+                          <li class="text-xs text-slate-400 flex gap-2">
+                            <span class="text-amber-400 flex-shrink-0">→</span>
+                            <span x-text="s"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- Right: QA mapping + explanation -->
+                  <div class="space-y-4">
+                    <!-- Matched QA files -->
+                    <div x-show="cls.relevantQaFiles?.length">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full bg-violet-400"></div>
+                        <span class="text-xs font-semibold text-violet-400 uppercase tracking-wide">Mapped QA Files</span>
+                      </div>
+                      <div class="space-y-1">
+                        <template x-for="f in cls.relevantQaFiles" :key="f">
+                          <div class="flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <code class="text-xs font-mono text-violet-300" x-text="f"></code>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Explanation -->
+                    <div x-show="cls.explanation">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full bg-sky-400"></div>
+                        <span class="text-xs font-semibold text-sky-400 uppercase tracking-wide">Analysis</span>
+                      </div>
+                      <p class="text-xs text-slate-400 leading-relaxed" x-text="cls.explanation"></p>
+                    </div>
+
+                    <!-- Implementation notes (dev class reference) -->
+                    <div x-show="cls.implementationNotes">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full bg-indigo-400"></div>
+                        <span class="text-xs font-semibold text-indigo-400 uppercase tracking-wide">Dev Class Reference</span>
+                      </div>
+                      <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                        <p class="text-xs text-slate-400 leading-relaxed" x-text="cls.implementationNotes"></p>
+                      </div>
+                    </div>
+
+                    <!-- Suggested Gherkin -->
+                    <div x-show="cls.suggestedGherkin">
+                      <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                          <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+                          <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">Suggested Gherkin</span>
+                        </div>
+                        <button @click="copyGherkin(cls)" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">copy</button>
+                      </div>
+                      <pre class="text-xs text-slate-400 bg-slate-900/60 rounded-lg p-3 border border-slate-700/50 overflow-x-auto leading-relaxed" x-text="cls.suggestedGherkin"></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div x-show="filteredClasses().length===0 && cov.report" class="text-center py-12 text-slate-500">
+            No classes match the current filter.
+          </div>
+        </div>
+
+        <!-- Executive summary -->
+        <div x-show="cov.report?.executiveSummary" class="card-glow bg-slate-800/60 rounded-2xl border border-slate-700/50 p-6 backdrop-blur-sm">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+            </svg>
+            Executive Summary
+          </h3>
+          <p class="text-sm text-slate-400 leading-relaxed whitespace-pre-line" x-text="cov.report?.executiveSummary"></p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+
+  <script>
+  function app() {
+    return {
+      activeTab: 'analyser',
+      chart: null,
+
+      analyser: {
+        repoUrl: '', branch: 'main', token: '', maxDepth: '5', outputFormat: 'MARKDOWN',
+        mode: 'AI',
+        loading: false, jobId: null, status: null, error: null,
+        artifactTab: 'business-logic',
+        renderedArtifacts: {}, gherkinFeatures: [],
+        stats: {}
+      },
+
+      cov: {
+        devRepoUrl: '', devBranch: 'main',
+        qaRepoUrl: '', qaBranch: 'main',
+        token: '', layerFocus: 'ALL', reportFormat: 'FULL',
+        mode: 'AI',
+        loading: false, jobId: null, status: null, error: null,
+        report: null, filter: 'ALL', search: ''
+      },
+
+      init() {
+        // Restore last session if any
+      },
+
+      // ── Analyser ──────────────────────────────────────────────────────
+
+      async submitAnalysis() {
+        this.analyser.loading = true;
+        this.analyser.jobId = null;
+        this.analyser.status = null;
+        this.analyser.renderedArtifacts = {};
+        this.analyser.gherkinFeatures = [];
+        try {
+          const res = await fetch('/api/v1/analyse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repoUrl: this.analyser.repoUrl,
+              branch: this.analyser.branch,
+              githubToken: this.analyser.token || undefined,
+              options: {
+                maxDepth: parseInt(this.analyser.maxDepth),
+                outputFormat: this.analyser.outputFormat,
+                analysisMode: this.analyser.mode
+              }
+            })
+          });
+          const data = await res.json();
+          this.analyser.jobId = data.jobId;
+          this.analyser.status = data.status;
+          this.pollAnalysis();
+        } catch(e) {
+          this.analyser.error = e.message;
+        } finally {
+          this.analyser.loading = false;
+        }
+      },
+
+      async pollAnalysis() {
+        const interval = setInterval(async () => {
+          const res = await fetch('/api/v1/jobs/' + this.analyser.jobId);
+          const data = await res.json();
+          this.analyser.status = data.status;
+          this.analyser.stats = { filesAnalysed: data.filesAnalysed, durationMs: data.durationMs };
+          if (data.status === 'COMPLETED') {
+            clearInterval(interval);
+            await this.loadArtifacts(data.artifacts);
+          } else if (data.status === 'FAILED') {
+            clearInterval(interval);
+            this.analyser.error = data.error;
+          }
+        }, 2500);
+      },
+
+      async loadArtifacts(artifacts) {
+        const tabs = ['business-logic', 'method-hierarchy', 'integrations'];
+        for (const tab of tabs) {
+          const res = await fetch(artifacts[tab.replace('-', '') === 'businesslogic' ? 'businessLogic' :
+            tab === 'method-hierarchy' ? 'methodHierarchy' : 'integrations']);
+          const text = await res.text();
+          this.analyser.renderedArtifacts[tab] = marked.parse(text);
+        }
+        const gherkinRes = await fetch(artifacts.gherkin);
+        const raw = await gherkinRes.json();
+        this.analyser.gherkinFeatures = raw;
+      },
+
+      async downloadArtifact(tab) {
+        const text = tab === 'gherkin'
+          ? JSON.stringify(this.analyser.gherkinFeatures, null, 2)
+          : this.analyser.renderedArtifacts[tab];
+        const blob = new Blob([text], {type: 'text/plain'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = tab + (tab==='gherkin' ? '.json' : '.md'); a.click();
+      },
+
+      // ── Coverage ──────────────────────────────────────────────────────
+
+      async submitCoverage() {
+        this.cov.loading = true;
+        this.cov.jobId = null;
+        this.cov.status = null;
+        this.cov.report = null;
+        this.cov.error = null;
+        try {
+          const res = await fetch('/api/v1/coverage/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              devRepoUrl: this.cov.devRepoUrl, devBranch: this.cov.devBranch,
+              qaRepoUrl: this.cov.qaRepoUrl, qaBranch: this.cov.qaBranch,
+              githubToken: this.cov.token || undefined,
+              layerFocus: this.cov.layerFocus,
+              reportFormat: this.cov.reportFormat,
+              analysisMode: this.cov.mode
+            })
+          });
+          const data = await res.json();
+          this.cov.jobId = data.jobId;
+          this.cov.status = data.status;
+          this.pollCoverage();
+        } catch(e) {
+          this.cov.error = e.message;
+        } finally {
+          this.cov.loading = false;
+        }
+      },
+
+      async pollCoverage() {
+        const interval = setInterval(async () => {
+          const res = await fetch('/api/v1/coverage/jobs/' + this.cov.jobId);
+          const data = await res.json();
+          this.cov.status = data.status;
+          if (data.status === 'COMPLETED') {
+            clearInterval(interval);
+            const reportRes = await fetch('/api/v1/coverage/jobs/' + this.cov.jobId + '/report');
+            this.cov.report = await reportRes.json();
+            // mark all collapsed
+            (this.cov.report.classes || []).forEach(c => c._open = false);
+            this.$nextTick(() => this.renderChart());
+          } else if (data.status === 'FAILED') {
+            clearInterval(interval);
+            this.cov.error = data.error;
+          }
+        }, 2500);
+      },
+
+      renderChart() {
+        const s = this.cov.report?.summary;
+        if (!s) return;
+        const ctx = document.getElementById('coverageChart');
+        if (!ctx) return;
+        if (this.chart) this.chart.destroy();
+        this.chart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Covered','Partial','Missed','Not Needed'],
+            datasets: [{
+              data: [s.covered, s.partial, s.notCovered, s.notNeeded],
+              backgroundColor: ['rgba(16,185,129,.7)','rgba(245,158,11,.7)','rgba(239,68,68,.7)','rgba(100,116,139,.4)'],
+              borderColor: ['#10b981','#f59e0b','#ef4444','#64748b'],
+              borderWidth: 1.5,
+              hoverOffset: 4
+            }]
+          },
+          options: {
+            cutout: '72%',
+            plugins: { legend: { display: false }, tooltip: { callbacks: {
+              label: ctx => ` ${ctx.label}: ${ctx.parsed}`
+            }}},
+            animation: { animateRotate: true, duration: 800 }
+          }
+        });
+      },
+
+      coverageStats() {
+        const s = this.cov.report?.summary;
+        if (!s) return [];
+        return [
+          { label: 'Total Classes', value: s.totalDevClasses, color: 'text-white', bg: 'bg-slate-700/40' },
+          { label: 'Covered', value: s.covered, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+          { label: 'Partial', value: s.partial, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+          { label: 'Missed', value: s.notCovered, color: 'text-red-400', bg: 'bg-red-500/10' },
+        ];
+      },
+
+      filteredClasses() {
+        const classes = this.cov.report?.classes || [];
+        return classes.filter(c => {
+          const matchFilter = this.cov.filter === 'ALL' || c.status === this.cov.filter;
+          const matchSearch = !this.cov.search || c.devClass.toLowerCase().includes(this.cov.search.toLowerCase())
+            || c.devFile?.toLowerCase().includes(this.cov.search.toLowerCase());
+          return matchFilter && matchSearch;
+        });
+      },
+
+      classCount(filter) {
+        const classes = this.cov.report?.classes || [];
+        return filter === 'ALL' ? classes.length : classes.filter(c => c.status === filter).length;
+      },
+
+      methodCoverage(cls) {
+        const total = (cls.coveredMethods?.length || 0) + (cls.missedMethods?.length || 0);
+        if (!total) return cls.status === 'COVERED' ? 100 : 0;
+        return Math.round((cls.coveredMethods?.length || 0) / total * 100);
+      },
+
+      exportReport(format) {
+        if (format === 'json') {
+          const blob = new Blob([JSON.stringify(this.cov.report, null, 2)], {type:'application/json'});
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+          a.download = 'coverage-report.json'; a.click();
+        } else {
+          const md = this.buildMarkdownReport();
+          const blob = new Blob([md], {type:'text/markdown'});
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+          a.download = 'coverage-report.md'; a.click();
+        }
+      },
+
+      buildMarkdownReport() {
+        const r = this.cov.report;
+        const s = r.summary;
+        let md = `# Coverage Intelligence Report\n\n`;
+        md += `**Dev Repo:** ${this.cov.devRepoUrl}  \n**QA Repo:** ${this.cov.qaRepoUrl}  \n\n`;
+        md += `## Summary\n\n| Metric | Value |\n|---|---|\n`;
+        md += `| Coverage Score | **${s.coverageScore}%** |\n| Total Dev Classes | ${s.totalDevClasses} |\n`;
+        md += `| Covered | ${s.covered} |\n| Partial | ${s.partial} |\n`;
+        md += `| Not Covered | ${s.notCovered} |\n| Not Needed | ${s.notNeeded} |\n\n`;
+        for (const cls of r.classes) {
+          md += `## ${cls.devClass} [${cls.status}]\n\n`;
+          md += `**File:** \`${cls.devFile}\`  \n**Layer:** ${cls.layer}\n\n`;
+          if (cls.explanation) md += `> ${cls.explanation}\n\n`;
+          if (cls.coveredMethods?.length) md += `### ✅ Covered\n${cls.coveredMethods.map(m=>`- \`${m}\``).join('\n')}\n\n`;
+          if (cls.missedMethods?.length) md += `### ❌ Missing\n${cls.missedMethods.map(m=>`- \`${m}\``).join('\n')}\n\n`;
+          if (cls.missingScenarios?.length) md += `### Missing Scenarios\n${cls.missingScenarios.map(s=>`- ${s}`).join('\n')}\n\n`;
+          if (cls.suggestedGherkin) md += `### Suggested Gherkin\n\`\`\`gherkin\n${cls.suggestedGherkin}\n\`\`\`\n\n`;
+          md += `---\n\n`;
+        }
+        return md;
+      },
+
+      async copyGherkin(cls) {
+        await navigator.clipboard.writeText(cls.suggestedGherkin);
+      }
+    }
+  }
+  </script>
+</body>
+</html>

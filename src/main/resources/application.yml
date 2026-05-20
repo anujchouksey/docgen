@@ -1,0 +1,102 @@
+spring:
+  application:
+    name: repo-doc-gen
+  datasource:
+    url: ${DB_URL:jdbc:h2:mem:repoinsight;DB_CLOSE_DELAY=-1}
+    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+    username: ${DB_USER:sa}
+    password: ${DB_PASS:}
+  jpa:
+    hibernate:
+      ddl-auto: ${DDL_AUTO:update}
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: ${HIBERNATE_DIALECT:org.hibernate.dialect.H2Dialect}
+  cache:
+    type: simple
+  security:
+    user:
+      name: ${ADMIN_USER:admin}
+      password: ${ADMIN_PASS:changeme}
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 20
+        queue-capacity: 100
+      thread-name-prefix: doc-gen-
+
+server:
+  port: 8080
+  shutdown: graceful
+
+# ── Analysis engine ──────────────────────────────────────────────────────────
+# COPILOT (default) — GitHub Copilot Chat API (enterprise-ready)
+# CLAUDE             — Anthropic Claude (requires ANTHROPIC_API_KEY)
+# STATIC             — No LLM; JavaParser AST only (works offline)
+analysis:
+  engine: ${ANALYSIS_ENGINE:COPILOT}
+  max-depth: ${MAX_DEPTH:5}
+  parallel-agents: true
+  secret-scrub-patterns:
+    - "(?i)(password|secret|token|key|auth)\\s*=\\s*['\"][^'\"]{6,}['\"]"
+    - "(?i)Bearer\\s+[A-Za-z0-9\\-._~+/]+=*"
+  cache-ttl-minutes: 60
+  # Resolved at runtime using the JVM temp dir — works on Windows, Mac, Linux.
+  # Override with OUTPUT_DIR env var if you need a specific location.
+  output-dir: ${OUTPUT_DIR:${java.io.tmpdir}/repo-doc-gen}
+
+# ── GitHub (repo fetching + Copilot) ────────────────────────────────────────
+github:
+  api-base-url: https://api.github.com
+  token: ${GITHUB_TOKEN:}
+  max-file-size-bytes: 102400   # 100 KB per file
+  max-files-per-repo: 500
+  # Path segments to exclude from analysis.
+  # GitHub API always returns paths with forward slashes — these are substring matches,
+  # not filesystem globs, so they work identically on Windows, Mac, and Linux.
+  excluded-paths:
+    - "/test/"
+    - "/generated/"
+    - "/target/"
+    - "/build/"
+    - "/.mvn/"
+    - "/node_modules/"
+    - "/__pycache__/"
+
+  # GitHub Copilot Chat API
+  # Enterprise (GHES): override token-exchange-url to point at your GHES host:
+  #   e.g. https://github.mycompany.com/api/v3/copilot_internal/v2/token
+  copilot:
+    token-exchange-url: ${COPILOT_TOKEN_URL:https://api.github.com/copilot_internal/v2/token}
+    completions-url: ${COPILOT_COMPLETIONS_URL:https://api.githubcopilot.com/chat/completions}
+    model: ${COPILOT_MODEL:gpt-4o}
+    max-tokens: ${COPILOT_MAX_TOKENS:4096}
+    timeout-seconds: 120
+
+# ── Claude (optional fallback, active only when analysis.engine=CLAUDE) ──────
+anthropic:
+  api-key: ${ANTHROPIC_API_KEY:}
+  model: claude-sonnet-4-6
+  max-tokens: 8192
+  timeout-seconds: 120
+  prompt-cache-enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.repoinsight: INFO
+    org.springframework.web: WARN
