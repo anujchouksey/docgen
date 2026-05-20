@@ -5,6 +5,7 @@ import com.repoinsight.coverage.agent.CoverageComparisonAgent;
 import com.repoinsight.coverage.model.CoverageCompareRequest;
 import com.repoinsight.coverage.model.CoverageReport;
 import com.repoinsight.github.GitHubRepoFetcher;
+import com.repoinsight.github.LocalRepoFetcher;
 import com.repoinsight.github.model.GitHubFile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ public class CoverageComparisonService {
 
     private final GitHubRepoFetcher devFetcher;
     private final QARepoFetcher qaFetcher;
+    private final LocalRepoFetcher localFetcher;
     private final CoverageComparisonAgent aiAgent;
     private final StaticCoverageAnalyser staticAnalyser;
     private final CoverageJobRepository jobRepository;
@@ -50,18 +52,27 @@ public class CoverageComparisonService {
         jobRepository.save(job);
 
         try {
-            GitHubRepoFetcher.RepoCoordinates devCoords =
-                    GitHubRepoFetcher.RepoCoordinates.parse(job.getDevRepoUrl(), job.getDevBranch());
-            GitHubRepoFetcher.RepoCoordinates qaCoords =
-                    GitHubRepoFetcher.RepoCoordinates.parse(job.getQaRepoUrl(), job.getQaBranch());
+            List<GitHubFile> devFiles;
+            if (LocalRepoFetcher.isLocalPath(job.getDevRepoUrl())) {
+                log.info("Fetching dev files from local path: {}", job.getDevRepoUrl());
+                devFiles = localFetcher.fetchJavaFiles(job.getDevRepoUrl());
+            } else {
+                GitHubRepoFetcher.RepoCoordinates devCoords =
+                        GitHubRepoFetcher.RepoCoordinates.parse(job.getDevRepoUrl(), job.getDevBranch());
+                log.info("Fetching dev files: {}/{}", devCoords.owner(), devCoords.repo());
+                devFiles = devFetcher.fetchJavaFiles(devCoords.owner(), devCoords.repo(), devCoords.branch());
+            }
 
-            log.info("Fetching dev files: {}/{}", devCoords.owner(), devCoords.repo());
-            List<GitHubFile> devFiles = devFetcher.fetchJavaFiles(
-                    devCoords.owner(), devCoords.repo(), devCoords.branch());
-
-            log.info("Fetching QA files: {}/{}", qaCoords.owner(), qaCoords.repo());
-            List<GitHubFile> qaFiles = qaFetcher.fetchTestFiles(
-                    qaCoords.owner(), qaCoords.repo(), qaCoords.branch());
+            List<GitHubFile> qaFiles;
+            if (LocalRepoFetcher.isLocalPath(job.getQaRepoUrl())) {
+                log.info("Fetching QA files from local path: {}", job.getQaRepoUrl());
+                qaFiles = localFetcher.fetchTestFiles(job.getQaRepoUrl());
+            } else {
+                GitHubRepoFetcher.RepoCoordinates qaCoords =
+                        GitHubRepoFetcher.RepoCoordinates.parse(job.getQaRepoUrl(), job.getQaBranch());
+                log.info("Fetching QA files: {}/{}", qaCoords.owner(), qaCoords.repo());
+                qaFiles = qaFetcher.fetchTestFiles(qaCoords.owner(), qaCoords.repo(), qaCoords.branch());
+            }
 
             boolean useAi = !"STATIC".equalsIgnoreCase(job.getAnalysisMode());
             log.info("Coverage job {}: running in {} mode", jobId, useAi ? "AI" : "STATIC");

@@ -5,6 +5,7 @@ import com.repoinsight.agent.RepoAnalysisOrchestrator;
 import com.repoinsight.analyzer.model.AnalysisResult;
 import com.repoinsight.generator.DocumentationGenerator;
 import com.repoinsight.github.GitHubRepoFetcher;
+import com.repoinsight.github.LocalRepoFetcher;
 import com.repoinsight.github.model.GitHubFile;
 import com.repoinsight.static_analysis.StaticAnalysisOrchestrator;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import java.util.List;
 public class RepoDocumentationService {
 
     private final GitHubRepoFetcher repoFetcher;
+    private final LocalRepoFetcher localFetcher;
     private final RepoAnalysisOrchestrator aiOrchestrator;
     private final StaticAnalysisOrchestrator staticOrchestrator;
     private final DocumentationGenerator docGenerator;
@@ -48,11 +50,14 @@ public class RepoDocumentationService {
         jobRepository.save(job);
 
         try {
-            GitHubRepoFetcher.RepoCoordinates coords =
-                    GitHubRepoFetcher.RepoCoordinates.parse(job.getRepoUrl(), job.getBranch());
-
-            List<GitHubFile> files = repoFetcher.fetchJavaFiles(
-                    coords.owner(), coords.repo(), coords.branch());
+            List<GitHubFile> files;
+            if (LocalRepoFetcher.isLocalPath(job.getRepoUrl())) {
+                files = localFetcher.fetchJavaFiles(job.getRepoUrl());
+            } else {
+                GitHubRepoFetcher.RepoCoordinates coords =
+                        GitHubRepoFetcher.RepoCoordinates.parse(job.getRepoUrl(), job.getBranch());
+                files = repoFetcher.fetchJavaFiles(coords.owner(), coords.repo(), coords.branch());
+            }
 
             boolean useAi = !"STATIC".equalsIgnoreCase(job.getAnalysisMode());
             log.info("Job {}: running in {} mode", jobId, useAi ? "AI" : "STATIC");

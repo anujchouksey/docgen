@@ -103,8 +103,8 @@ public class RepoDocController {
     @Data
     public static class AnalyseRequest {
         @NotBlank
-        @Pattern(regexp = "https://github\\.com/[\\w.-]+/[\\w.-]+",
-                 message = "Must be a valid GitHub repository URL")
+        @Pattern(regexp = "https://github\\.com/[\\w.\\-]+/[\\w.\\-]+|/.*|file://.*|[A-Za-z]:\\\\.*",
+                 message = "Must be a GitHub URL (https://github.com/owner/repo) or an absolute local path")
         private String repoUrl;
 
         @NotBlank

@@ -8,16 +8,16 @@ import lombok.Data;
 public class CoverageCompareRequest {
 
     @NotBlank
-    @Pattern(regexp = "https://github\\.com/[\\w.\\-]+/[\\w.\\-]+",
-             message = "Must be a valid GitHub repository URL")
+    @Pattern(regexp = "https://github\\.com/[\\w.\\-]+/[\\w.\\-]+|/.*|file://.*|[A-Za-z]:\\\\.*",
+             message = "Must be a GitHub URL or an absolute local path")
     private String devRepoUrl;
 
     @NotBlank
     private String devBranch = "main";
 
     @NotBlank
-    @Pattern(regexp = "https://github\\.com/[\\w.\\-]+/[\\w.\\-]+",
-             message = "Must be a valid GitHub repository URL")
+    @Pattern(regexp = "https://github\\.com/[\\w.\\-]+/[\\w.\\-]+|/.*|file://.*|[A-Za-z]:\\\\.*",
+             message = "Must be a GitHub URL or an absolute local path")
     private String qaRepoUrl;
 
     @NotBlank
