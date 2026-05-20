@@ -8,6 +8,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import org.springframework.test.util.ReflectionTestUtils;
+
 import java.io.IOException;
 import java.util.Base64;
 import java.util.List;
@@ -27,6 +29,13 @@ class GitHubRepoFetcherTest {
                 .baseUrl(mockServer.url("/").toString())
                 .build();
         fetcher = new GitHubRepoFetcher(client);
+        ReflectionTestUtils.setField(fetcher, "maxFileSizeBytes", 102400L);
+        ReflectionTestUtils.setField(fetcher, "maxFiles", 500);
+        ReflectionTestUtils.setField(fetcher, "secretPatterns",
+                List.of("(?i)(password|secret|token|key|auth)\\s*=\\s*['\"][^'\"]{6,}['\"]",
+                        "(?i)Bearer\\s+[A-Za-z0-9\\-._~+/]+=*"));
+        ReflectionTestUtils.setField(fetcher, "excludedPathSegments",
+                List.of("/test/", "/generated/", "/target/", "/build/", "/.mvn/"));
     }
 
     @AfterEach

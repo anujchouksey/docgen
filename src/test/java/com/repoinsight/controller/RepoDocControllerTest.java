@@ -37,7 +37,7 @@ class RepoDocControllerTest {
     @DisplayName("POST /api/v1/analyse returns 202 with jobId and pollUrl")
     void analyse_validRequest_returns202() throws Exception {
         AnalysisJob job = buildJob("job-001", AnalysisJob.JobStatus.QUEUED);
-        when(service.createJob(anyString(), anyString())).thenReturn(job);
+        when(service.createJob(anyString(), anyString(), anyString())).thenReturn(job);
 
         mvc.perform(post("/api/v1/analyse")
                         .with(csrf())

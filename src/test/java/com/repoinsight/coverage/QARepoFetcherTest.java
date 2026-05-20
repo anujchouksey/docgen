@@ -9,6 +9,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import org.springframework.test.util.ReflectionTestUtils;
+
 import java.io.IOException;
 import java.util.Base64;
 import java.util.List;
@@ -26,6 +28,8 @@ class QARepoFetcherTest {
         mockServer.start();
         WebClient client = WebClient.builder().baseUrl(mockServer.url("/").toString()).build();
         fetcher = new QARepoFetcher(client);
+        ReflectionTestUtils.setField(fetcher, "maxFileSizeBytes", 102400L);
+        ReflectionTestUtils.setField(fetcher, "maxFiles", 500);
     }
 
     @AfterEach

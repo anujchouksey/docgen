@@ -32,11 +32,8 @@ server:
   shutdown: graceful
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
-# STATIC mode: set ANALYSIS_ENGINE=STATIC to use JavaParser AST only (offline)
 analysis:
-  engine: ${ANALYSIS_ENGINE:COPILOT}
   max-depth: ${MAX_DEPTH:5}
-  parallel-agents: true
   secret-scrub-patterns:
     - "(?i)(password|secret|token|key|auth)\\s*=\\s*['\"][^'\"]{6,}['\"]"
     - "(?i)Bearer\\s+[A-Za-z0-9\\-._~+/]+=*"
