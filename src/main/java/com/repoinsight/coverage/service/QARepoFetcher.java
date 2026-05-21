@@ -37,10 +37,29 @@ public class QARepoFetcher {
     @Value("${github.max-files-per-repo:500}")
     private int maxFiles;
 
+    /** Name suffixes that identify BDD / test files to fetch from the QA repo. */
     private static final List<String> QA_SUFFIXES = List.of(
-            "Test.java", "Tests.java", "Spec.java", "IT.java",
+            // Feature files (Gherkin)
+            ".feature",
+            // Step definitions — explicit suffixes
             "Steps.java", "StepDefs.java", "StepDefinitions.java",
-            "TestCase.java", ".feature", "E2ETest.java", "IntegrationTest.java"
+            "StepDef.java", "Step.java",
+            // Hooks
+            "Hooks.java", "Hook.java",
+            // Cucumber runners / configuration
+            "Runner.java", "RunTest.java", "RunTests.java",
+            "RunCucumber.java", "CucumberTest.java",
+            "CucumberContextConfiguration.java",
+            // Classic JUnit/TestNG tests that may have step-def style assertions
+            "Test.java", "Tests.java", "Spec.java", "IT.java",
+            "TestCase.java", "E2ETest.java", "IntegrationTest.java",
+            // Cucumber config files
+            "cucumber.properties", "junit-platform.properties"
+    );
+
+    /** Extra name fragments that identify BDD glue files regardless of suffix. */
+    private static final List<String> BDD_NAME_HINTS = List.of(
+            "Steps", "StepDef", "Hooks", "Hook", "Glue", "Runner", "CucumberContext"
     );
 
     public List<GitHubFile> fetchTestFiles(String owner, String repo, String branch) {
@@ -73,7 +92,11 @@ public class QARepoFetcher {
     }
 
     private boolean isTestFile(String path) {
-        return QA_SUFFIXES.stream().anyMatch(path::endsWith);
+        if (QA_SUFFIXES.stream().anyMatch(path::endsWith)) return true;
+        // Also pick up any .java file whose name contains a BDD hint word
+        String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
+        return fileName.endsWith(".java")
+                && BDD_NAME_HINTS.stream().anyMatch(hint -> fileName.contains(hint));
     }
 
     private Mono<GitHubFile> fetchContent(String owner, String repo, String sha, String path) {

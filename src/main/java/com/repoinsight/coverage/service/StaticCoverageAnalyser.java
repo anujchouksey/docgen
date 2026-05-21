@@ -1,6 +1,8 @@
 package com.repoinsight.coverage.service;
 
 import com.repoinsight.coverage.model.*;
+import com.repoinsight.coverage.service.BddQaAnalyser.BddQaIndex;
+import com.repoinsight.coverage.service.BddQaAnalyser.FeatureScenario;
 import com.repoinsight.github.model.GitHubFile;
 import com.repoinsight.static_analysis.JavaAstParser;
 import com.repoinsight.static_analysis.TemplateGherkinGenerator;
@@ -34,8 +36,9 @@ import java.util.stream.Collectors;
 @Slf4j
 public class StaticCoverageAnalyser {
 
-    private final JavaAstParser astParser;
+    private final JavaAstParser            astParser;
     private final TemplateGherkinGenerator gherkinGenerator;
+    private final BddQaAnalyser            bddQaAnalyser;
 
     private static final Set<String> NO_NEED_LAYERS = Set.of("DTO", "ENTITY", "CONFIG", "EXCEPTION");
     private static final Set<String> NO_NEED_ANNOTATIONS = Set.of("Configuration", "ConfigurationProperties", "SpringBootApplication");
@@ -53,7 +56,15 @@ public class StaticCoverageAnalyser {
         long start = System.currentTimeMillis();
         log.info("StaticCoverageAnalyser: {} dev files vs {} QA files", devFiles.size(), qaFiles.size());
 
-        // Parse dev files
+        // Phase 1 — fully analyse BDD QA repo first
+        log.info("Phase 1: building BDD QA index…");
+        BddQaIndex bddIndex = bddQaAnalyser.buildIndex(qaFiles);
+        log.info("BDD index: {} scenarios (happy={}, edge={}), {} step defs, tags: {}",
+                bddIndex.scenarios().size(), bddIndex.happyPathCount(), bddIndex.edgeCaseCount(),
+                bddIndex.stepDefs().size(), bddIndex.tagsSummary());
+
+        // Phase 2 — parse dev files, build class-level QA file index
+        log.info("Phase 2: parsing dev classes and matching against BDD index…");
         List<ParsedClass> devClasses = devFiles.stream()
                 .map(astParser::parse)
                 .filter(Optional::isPresent)
@@ -61,12 +72,12 @@ public class StaticCoverageAnalyser {
                 .filter(c -> matchesLayerFocus(c, layerFocus))
                 .toList();
 
-        // Build QA index
-        QaIndex qaIndex = buildQaIndex(qaFiles);
+        // Build combined QA index (Java AST refs + BDD entity matching)
+        QaIndex qaIndex = buildQaIndex(qaFiles, bddIndex);
 
         // Analyse each dev class
         List<ClassCoverageReport> reports = devClasses.stream()
-                .map(cls -> analyseClass(cls, qaIndex))
+                .map(cls -> analyseClass(cls, qaIndex, bddIndex))
                 .toList();
 
         CoverageSummary summary = computeSummary(reports);
@@ -88,7 +99,7 @@ public class StaticCoverageAnalyser {
 
     // ── Per-class analysis ─────────────────────────────────────────────────
 
-    private ClassCoverageReport analyseClass(ParsedClass cls, QaIndex qaIndex) {
+    private ClassCoverageReport analyseClass(ParsedClass cls, QaIndex qaIndex, BddQaIndex bddIndex) {
         // NOT_NEEDED detection
         if (isNotNeeded(cls)) {
             return ClassCoverageReport.builder()
@@ -102,7 +113,7 @@ public class StaticCoverageAnalyser {
                     .build();
         }
 
-        // Find matching QA files
+        // Find matching QA files via combined Java-AST + BDD-entity lookup
         List<String> matchedQaFiles = qaIndex.findMatchingFiles(cls.getSimpleName());
 
         List<ParsedMethod> publicMethods = cls.getMethods().stream()
@@ -114,7 +125,7 @@ public class StaticCoverageAnalyser {
         }
 
         if (matchedQaFiles.isEmpty()) {
-            // MISSED
+            // MISSED — no QA file or BDD scenario references this class
             List<String> missed = publicMethods.stream().map(ParsedMethod::signature).toList();
             List<String> suggestions = buildMissingScenarios(cls, publicMethods, List.of());
             return ClassCoverageReport.builder()
@@ -122,25 +133,30 @@ public class StaticCoverageAnalyser {
                     .status(CoverageStatus.MISSED)
                     .coveredMethods(List.of()).missedMethods(missed)
                     .missingScenarios(suggestions).relevantQaFiles(List.of())
-                    .explanation("No QA file references " + cls.getSimpleName() + " semantically.")
+                    .explanation("No Gherkin scenario or step definition references " + cls.getSimpleName()
+                            + " or its business entity. Neither by class name, REST path, nor derived entity word.")
                     .implementationNotes(buildImplNotes(cls))
                     .suggestedGherkin(buildSuggestedGherkin(cls, publicMethods))
                     .build();
         }
 
-        // Check method-level coverage
+        // Method-level coverage check — raw QA text + BDD step defs
         Set<String> qaContent = qaIndex.contentOf(matchedQaFiles);
-        List<String> covered = new ArrayList<>();
-        List<String> missed = new ArrayList<>();
+        List<String> covered  = new ArrayList<>();
+        List<String> missed   = new ArrayList<>();
 
         for (ParsedMethod method : publicMethods) {
-            boolean mentioned = isMethodMentioned(method.getName(), qaContent);
+            boolean mentioned = isMethodMentioned(method.getName(), qaContent)
+                    || bddIndex.stepDefCalls(method.getName())
+                    || !bddIndex.scenariosMatching(
+                            splitEntityWords(method.getName())).isEmpty();
             if (mentioned) covered.add(method.signature());
-            else missed.add(method.signature());
+            else           missed.add(method.signature());
         }
 
-        // Check for edge-case / failure scenarios in QA content
-        boolean hasEdgeCases = hasEdgeCaseScenarios(qaContent);
+        // Edge-case detection: BDD tags take priority, then text heuristics
+        boolean hasEdgeCases = hasEdgeCaseScenariosInBdd(bddIndex, matchedQaFiles)
+                || hasEdgeCaseScenarios(qaContent);
 
         CoverageStatus status;
         if (missed.isEmpty() && hasEdgeCases) {
@@ -155,9 +171,10 @@ public class StaticCoverageAnalyser {
                 missed.stream().map(s -> publicMethods.stream()
                         .filter(m -> m.signature().equals(s)).findFirst().orElseThrow()).toList(),
                 matchedQaFiles);
-        if (!hasEdgeCases && status == CoverageStatus.COVERED) {
-            missingScenarios.add("Edge case / failure scenarios (currently only happy path tested)");
-            status = CoverageStatus.PARTIAL;
+        if (!hasEdgeCases && status != CoverageStatus.MISSED) {
+            missingScenarios.add(0, "Edge/failure scenarios missing — BDD suite only has happy-path coverage "
+                    + "(add @edge-case @db @kafka @http scenarios)");
+            if (status == CoverageStatus.COVERED) status = CoverageStatus.PARTIAL;
         }
 
         return ClassCoverageReport.builder()
@@ -165,7 +182,7 @@ public class StaticCoverageAnalyser {
                 .status(status)
                 .coveredMethods(covered).missedMethods(missed)
                 .missingScenarios(missingScenarios).relevantQaFiles(matchedQaFiles)
-                .explanation(buildExplanation(cls, covered, missed, matchedQaFiles, hasEdgeCases))
+                .explanation(buildExplanation(cls, covered, missed, matchedQaFiles, hasEdgeCases, bddIndex))
                 .implementationNotes(buildImplNotes(cls))
                 .suggestedGherkin(missed.isEmpty() ? null : buildSuggestedGherkin(cls, publicMethods))
                 .build();
@@ -173,36 +190,30 @@ public class StaticCoverageAnalyser {
 
     // ── QA Index ──────────────────────────────────────────────────────────
 
-    private QaIndex buildQaIndex(List<GitHubFile> qaFiles) {
-        Map<String, String> pathToContent = new HashMap<>();
-        Map<String, Set<String>> classToFiles = new HashMap<>();
+    private QaIndex buildQaIndex(List<GitHubFile> qaFiles, BddQaIndex bddIndex) {
+        Map<String, String>      pathToContent = new HashMap<>();
+        Map<String, Set<String>> classToFiles  = new HashMap<>();
 
         for (GitHubFile f : qaFiles) {
             pathToContent.put(f.getPath(), f.getContent());
 
-            // Java: parse imports + field declarations
             if (f.getPath().endsWith(".java")) {
                 astParser.parse(f).ifPresentOrElse(cls -> {
-                    // Record the test class's simple name
                     addMapping(classToFiles, cls.getSimpleName(), f.getPath());
-                    // Record referenced classes
-                    for (var field : cls.getFields()) {
-                        addMapping(classToFiles, extractBaseType(field.getType()), f.getPath());
-                    }
+                    cls.getFields().forEach(field ->
+                            addMapping(classToFiles, extractBaseType(field.getType()), f.getPath()));
                     cls.getMethods().forEach(m -> m.getCalledClasses().forEach(c ->
                             addMapping(classToFiles, c, f.getPath())));
-                }, () -> {
-                    // Fallback: regex scan for class name mentions
-                    extractClassReferences(f.getContent()).forEach(c ->
-                            addMapping(classToFiles, c, f.getPath()));
-                });
-            } else {
-                // .feature, .yml, etc. — regex scan
+                }, () -> extractClassReferences(f.getContent()).forEach(c ->
+                        addMapping(classToFiles, c, f.getPath())));
+            } else if (!f.getPath().endsWith(".feature")) {
+                // .yml, .properties etc — regex class-name scan
                 extractClassReferences(f.getContent()).forEach(c ->
                         addMapping(classToFiles, c, f.getPath()));
             }
+            // .feature files: BDD entity matching is handled in QaIndex.findMatchingFiles via bddIndex
         }
-        return new QaIndex(pathToContent, classToFiles);
+        return new QaIndex(pathToContent, classToFiles, bddIndex);
     }
 
     private void addMapping(Map<String, Set<String>> map, String className, String file) {
@@ -356,17 +367,43 @@ public class StaticCoverageAnalyser {
     // ── Explanation & suggestions ─────────────────────────────────────────
 
     private String buildExplanation(ParsedClass cls, List<String> covered, List<String> missed,
-                                    List<String> qaFiles, boolean hasEdgeCases) {
+                                    List<String> qaFiles, boolean hasEdgeCases, BddQaIndex bddIndex) {
         StringBuilder sb = new StringBuilder();
         sb.append(covered.size()).append(" of ").append(covered.size() + missed.size())
-                .append(" public methods have test coverage in ").append(String.join(", ", qaFiles)).append(". ");
+          .append(" public methods have BDD coverage via ").append(String.join(", ", qaFiles)).append(". ");
         if (!missed.isEmpty()) {
-            sb.append("Missing: ").append(String.join(", ", missed)).append(". ");
+            sb.append("No Gherkin scenario or step def covers: ").append(String.join(", ", missed)).append(". ");
         }
-        if (!hasEdgeCases) {
-            sb.append("Existing tests appear to cover only the happy path — no failure, boundary, or integration error scenarios detected.");
+        if (hasEdgeCases) {
+            sb.append("BDD suite includes edge/failure scenarios (").append(bddIndex.tagsSummary()).append("). ");
+        } else {
+            sb.append("BDD suite appears to cover only happy-path scenarios — "
+                    + "no @edge-case, @db, @kafka, @http, or @negative tags detected in matched scenarios. ");
+        }
+        // Tag summary
+        if (!bddIndex.allTags().isEmpty()) {
+            sb.append("All tags in QA suite: ").append(bddIndex.allTags()).append(".");
         }
         return sb.toString();
+    }
+
+    /** BDD-aware edge case check: look at tags on scenarios that match the QA files. */
+    private boolean hasEdgeCaseScenariosInBdd(BddQaIndex bddIndex, List<String> matchedFiles) {
+        Set<String> matchedFileSet = new HashSet<>(matchedFiles);
+        return bddIndex.scenarios().stream()
+                .filter(s -> matchedFileSet.contains(s.filePath()))
+                .anyMatch(FeatureScenario::isEdgeCase);
+    }
+
+    /**
+     * Splits a camelCase method name into lowercase words useful for BDD entity matching.
+     * createOrderItem → ["create", "order", "item"]  (only words ≥ 3 chars)
+     */
+    private String[] splitEntityWords(String methodName) {
+        return Arrays.stream(methodName.split("(?=[A-Z])|(?<=[a-z])(?=[A-Z])"))
+                .map(String::toLowerCase)
+                .filter(w -> w.length() >= 3)
+                .toArray(String[]::new);
     }
 
     private String buildImplNotes(ParsedClass cls) {
@@ -523,16 +560,45 @@ public class StaticCoverageAnalyser {
 
     // ── QaIndex inner class ────────────────────────────────────────────────
 
-    record QaIndex(Map<String, String> pathToContent, Map<String, Set<String>> classToFiles) {
+    record QaIndex(Map<String, String> pathToContent,
+                   Map<String, Set<String>> classToFiles,
+                   BddQaIndex bddIndex) {
+
         List<String> findMatchingFiles(String className) {
             Set<String> files = new HashSet<>();
-            // Direct name match (e.g. OrderService → OrderServiceTest)
+
+            // 1. Direct class-name match (e.g. OrderService → OrderServiceTest.java)
             classToFiles.getOrDefault(className, Set.of()).forEach(files::add);
-            // Convention match: OrderService → OrderServiceTest, OrderServiceIT, OrderServiceSpec
+
+            // 2. Convention prefix match (OrderService → OrderServiceIT, OrderServiceSpec…)
             classToFiles.entrySet().stream()
                     .filter(e -> e.getKey().startsWith(className))
                     .forEach(e -> files.addAll(e.getValue()));
+
+            // 3. BDD entity match — derive business entity from class name
+            //    OrderService → "order", UserController → "user", PaymentRepository → "payment"
+            String entity = deriveEntity(className);
+            if (!entity.isBlank()) {
+                // Feature files whose scenarios mention the entity word
+                bddIndex.featureFilesMatching(entity).forEach(files::add);
+                // Step def files that mention the entity in annotation or body
+                bddIndex.stepDefFilesMatching(entity).forEach(files::add);
+            }
+
             return List.copyOf(files);
+        }
+
+        /**
+         * Strips layer suffixes to get the core business entity word.
+         * OrderService → order | PaymentController → payment | UserRepository → user
+         */
+        private static String deriveEntity(String className) {
+            return className
+                    .replaceAll("(?i)(Service|Controller|Repository|Handler|Client|"
+                               + "Gateway|Manager|Producer|Consumer|Facade|UseCase|Helper|Util|Utils)$", "")
+                    .replaceAll("([A-Z])", " $1")
+                    .trim()
+                    .toLowerCase();
         }
 
         Set<String> contentOf(List<String> paths) {

@@ -18,9 +18,18 @@ import java.util.stream.Stream;
 public class LocalRepoFetcher {
 
     private static final List<String> QA_SUFFIXES = List.of(
+            ".feature",
+            "Steps.java", "StepDefs.java", "StepDefinitions.java", "StepDef.java", "Step.java",
+            "Hooks.java", "Hook.java",
+            "Runner.java", "RunTest.java", "RunTests.java",
+            "RunCucumber.java", "CucumberTest.java", "CucumberContextConfiguration.java",
             "Test.java", "Tests.java", "Spec.java", "IT.java",
-            "Steps.java", "StepDefs.java", "StepDefinitions.java",
-            "TestCase.java", ".feature", "E2ETest.java", "IntegrationTest.java"
+            "TestCase.java", "E2ETest.java", "IntegrationTest.java",
+            "cucumber.properties", "junit-platform.properties"
+    );
+
+    private static final List<String> BDD_NAME_HINTS = List.of(
+            "Steps", "StepDef", "Hooks", "Hook", "Glue", "Runner", "CucumberContext"
     );
 
     @Value("${github.max-file-size-bytes:102400}")
@@ -84,7 +93,19 @@ public class LocalRepoFetcher {
 
     private boolean isTestFile(Path path) {
         String name = path.getFileName().toString();
-        return QA_SUFFIXES.stream().anyMatch(name::endsWith);
+        if (QA_SUFFIXES.stream().anyMatch(name::endsWith)) return true;
+        // BDD name hints in file name
+        if (name.endsWith(".java") && BDD_NAME_HINTS.stream().anyMatch(name::contains)) return true;
+        // Content-based detection for local files: any .java with step annotations
+        if (name.endsWith(".java")) {
+            try {
+                String preview = Files.readString(path, StandardCharsets.UTF_8);
+                // Read only first 4KB to keep it fast
+                if (preview.length() > 4096) preview = preview.substring(0, 4096);
+                return preview.contains("@Given") || preview.contains("@When") || preview.contains("@Then");
+            } catch (IOException ignored) {}
+        }
+        return false;
     }
 
     private boolean isExcluded(String relativePath) {
