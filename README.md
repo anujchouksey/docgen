@@ -1,23 +1,32 @@
 # RepoDocGen
 
-Documentation and Gherkin test coverage intelligence for Java repositories.
+AI-powered documentation and BDD test coverage intelligence for Java repositories.
 
-Point it at any GitHub Java repo and get structured business logic docs, method call hierarchies, integration topology maps, and complete Gherkin feature files with typed step definitions. A second mode compares your dev repo against a QA test repo and produces a per-class coverage report (COVERED / PARTIAL / MISSED / NOT_NEEDED) with suggested Gherkin for every gap.
+Point it at any GitHub repo (or a local folder) and get structured business logic docs, method call hierarchies, integration topology maps, and complete Gherkin feature files. A second mode compares your Spring Boot dev repo against a Cucumber BDD QA repo and produces a per-class coverage report (COVERED / PARTIAL / MISSED / NOT_NEEDED) with suggested Gherkin for every gap.
 
-Three analysis engines are available: **GitHub Copilot** (default, enterprise GHES supported), **Anthropic Claude** (optional fallback), and **Static** (JavaParser AST, fully offline — no LLM required).
+---
+
+## Run It
+
+```bash
+GITHUB_TOKEN=ghp_yourtoken mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8083
+```
+
+Then open **http://localhost:8083**
+
+> **No GitHub token / no Copilot?** Select **Local Folder** in the UI and switch mode to **Static** — fully offline, zero config needed.
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
-- [Quick Start](#quick-start)
-- [Engine Comparison](#engine-comparison)
-- [GitHub Enterprise Server (GHES)](#github-enterprise-server-ghes)
+- [Analysis Engines](#analysis-engines)
+- [Local Folder Support](#local-folder-support)
+- [QA Coverage Analysis](#qa-coverage-analysis)
 - [Environment Variables](#environment-variables)
 - [API Reference](#api-reference)
 - [Generated Artefacts](#generated-artefacts)
-- [QA Coverage Analysis](#qa-coverage-analysis)
 - [Production Deployment](#production-deployment)
 - [Architecture](#architecture)
 - [Development & Tests](#development--tests)
@@ -28,77 +37,108 @@ Three analysis engines are available: **GitHub Copilot** (default, enterprise GH
 
 ## Features
 
-- Business logic narrative (what the system does, step by step, per public flow)
+- Business logic narrative — what the system does, step by step, per public flow
 - Method call hierarchy trees
-- Integration topology — detects and maps DB (JPA / JdbcTemplate), Kafka, S3, Redis/Cache, HTTP (RestTemplate / WebClient / Feign), and third-party SDKs
+- Integration topology — detects DB (JPA / JdbcTemplate), Kafka, S3, Redis/Cache, HTTP (RestTemplate / WebClient / Feign), and third-party SDKs
 - Complete Gherkin `.feature` files covering happy paths, boundary conditions, auth failures, and infrastructure failures
-- Typed step definition classes generated per integration — JdbcTemplate, `@EmbeddedKafka`, `@MockBean S3Client`, WireMockServer helpers
-- QA gap analysis: compares a dev repo against a QA repo, matching Gherkin English to Java methods using verb synonym groups and step definition annotation scanning
-- Static analysis mode using JavaParser AST — produces identical output shape with no API key
-- SPA web UI (Tailwind CSS + Alpine.js + Chart.js) — no build step required
-- Cross-platform: explicit UTF-8 throughout; works identically on Windows, macOS, and Linux
+- Typed step definition classes generated per integration (JdbcTemplate, `@EmbeddedKafka`, `@MockBean S3Client`, WireMockServer helpers)
+- BDD QA gap analysis — deeply compares a Cucumber BDD test repo against a Spring Boot dev repo using semantic / fuzzy matching (edit distance, subsequence detection, verb synonym groups)
+- Static analysis mode using JavaParser AST — identical output shape, no LLM, no API key
+- Local folder path support — skip GitHub entirely, point at any local clone
+- SPA web UI (Tailwind CSS + Alpine.js + Chart.js) — no build step
+- Cross-platform: explicit UTF-8 throughout, works on Windows / macOS / Linux
 
 ---
 
-## Quick Start
+## Analysis Engines
 
-### Prerequisites
+| | COPILOT (default) | STATIC (offline) |
+|---|---|---|
+| Requires API key | GitHub PAT + copilot scope | — |
+| Narrative quality | AI-generated prose | Template-based |
+| Gherkin quality | AI-generated | Template-based |
+| Coverage analysis | AI semantic matching | Heuristic + DeepBddMatcher |
+| Offline capable | No | Yes (local folder mode) |
+| Enterprise GHES | Yes — override `COPILOT_TOKEN_URL` | N/A |
 
-- Java 21+
-- Maven 3.9+ (or use the included `mvn` wrapper)
-- A GitHub Personal Access Token
-
-### Engine 1 — GitHub Copilot (default)
-
-Requires a GitHub PAT with the `copilot` scope.
+### GitHub Copilot (default)
 
 ```bash
 GITHUB_TOKEN=ghp_yourtoken mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8083
 ```
 
-Open `http://localhost:8083`.
+### Static / offline (no LLM, no API key)
 
----
-
-### Engine 2 — Static / offline (no LLM)
-
-Uses JavaParser AST only. No AI API key required. Still needs a GitHub token to fetch source files.
+Select **Static** in the UI mode dropdown, or set the env variable:
 
 ```bash
-export ANALYSIS_ENGINE=STATIC
-export GITHUB_TOKEN=ghp_yourtoken
+ANALYSIS_ENGINE=STATIC GITHUB_TOKEN=ghp_yourtoken mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8083
+```
 
-mvn spring-boot:run
+### GitHub Enterprise Server (GHES)
+
+```bash
+COPILOT_TOKEN_URL=https://github.mycompany.com/api/v3/copilot_internal/v2/token \
+GITHUB_TOKEN=ghp_yourenterprisetoken \
+mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8083
 ```
 
 ---
 
-## Engine Comparison
+## Local Folder Support
 
-| | COPILOT (default) | CLAUDE | STATIC |
-|---|---|---|---|
-| Requires API key | GitHub PAT + copilot scope | `ANTHROPIC_API_KEY` | — |
-| Narrative quality | High | High | Template-based |
-| Gherkin quality | High | High | Template-based |
-| Coverage analysis | AI-powered | AI-powered | Heuristic synonym matching |
-| Offline capable | No | No | Source-fetch only needs GitHub token |
-| Enterprise GHES | Yes — `COPILOT_TOKEN_URL` | N/A | N/A |
-| Prompt caching | No | Yes (Anthropic cache API) | N/A |
+Both the **Analyser** and **Coverage** tabs accept an absolute local path in place of a GitHub URL.
+
+| Input | Example |
+|---|---|
+| macOS / Linux | `/Users/me/projects/my-service` |
+| Windows | `C:\Projects\my-service` |
+| File URI | `file:///Users/me/projects/my-service` |
+
+When you click **Local Folder** in the UI the mode automatically switches to **Static** and the GitHub Token field is hidden — no token, no Copilot, no network needed.
 
 ---
 
-## GitHub Enterprise Server (GHES)
+## QA Coverage Analysis
 
-Override the Copilot token exchange URL to point at your GHES instance:
+Point the **Coverage** tab at your Spring Boot dev repo (source) and your Cucumber BDD QA repo (tests). The engine:
 
-```bash
-export COPILOT_TOKEN_URL=https://github.mycompany.com/api/v3/copilot_internal/v2/token
-export GITHUB_TOKEN=ghp_yourenterprisetoken
+1. **Phase 1 — BDD QA deep parse**: reads every `.feature` file (scenarios, tags, steps) and every step-definition `.java` file (`@Given/@When/@Then` patterns + method bodies) into a structured index.
+2. **Phase 2 — dev class comparison**: matches each public method in each Spring Boot class against the BDD index using a multi-signal scoring engine.
 
-mvn spring-boot:run
-```
+### Semantic / fuzzy matching (DeepBddMatcher)
 
-The completions endpoint (`COPILOT_COMPLETIONS_URL`) typically stays as the default `https://api.githubcopilot.com/chat/completions` even for GHES, but it is also overridable.
+BDD step text and Java method names rarely use identical words. The engine applies:
+
+| Signal | Example | Score |
+|---|---|---|
+| Verb exact match | step has `"validate"`, method is `validate…` | 40 pts |
+| Verb synonym group | step has `"check"`, method is `validate…` | 28 pts |
+| Verb stem match | step has `"validates"`, method is `validate…` | 38 pts |
+| Entity edit-distance ≤ 1 | step token `"xyz"`, method token `"xayz"` | 10 pts |
+| Entity subsequence | `"xyz"` chars appear in order in `"xayz"` | 8 pts |
+| Entity edit-distance ≤ 2 | | 6 pts |
+| Entity substring | | 4 pts |
+| Direct name in text | method name appears verbatim | +10 pts bonus |
+| **Match threshold** | | **50 pts** |
+
+**Walk-through of the canonical example:**
+- BDD step: `"When the system validates the xyz configuration"`
+- Dev method: `validateXayz()`
+- Verb `"validate"` == `"validate"` → **40 pts**
+- Entity token `"xayz"` vs `"xyz"`: edit distance = 1 → **10 pts**
+- Total: **50 → MATCH ✓** (would have been MISSED with exact-string matching)
+
+Synonym groups cover 20+ verb families: `create/add/save/register/post`, `get/find/fetch/load/retrieve/list`, `update/edit/modify/patch`, `delete/remove/cancel/archive`, `validate/check/verify/assert/confirm`, `process/handle/execute/run`, `send/publish/emit/dispatch`, and more.
+
+### Coverage status rules
+
+| Status | Meaning |
+|---|---|
+| **COVERED** | Every significant public method has a happy-path scenario AND at least one edge/failure scenario |
+| **PARTIAL** | Some methods or failure modes are missing |
+| **MISSED** | No Gherkin scenario or step def semantically exercises this class |
+| **NOT_NEEDED** | DTOs, `@Configuration`, exception subclasses, boilerplate-only classes |
 
 ---
 
@@ -108,25 +148,19 @@ The completions endpoint (`COPILOT_COMPLETIONS_URL`) typically stays as the defa
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `GITHUB_TOKEN` | **Yes** | — | GitHub PAT. Needs `repo` (read) + `copilot` scope when `ANALYSIS_ENGINE=COPILOT` |
-| `ANALYSIS_ENGINE` | No | `COPILOT` | `COPILOT`, `CLAUDE`, or `STATIC` |
-| `OUTPUT_DIR` | No | `<system tmpdir>/repo-doc-gen` | Directory where generated artefacts are written |
+| `GITHUB_TOKEN` | Yes (GitHub mode) | — | GitHub PAT. Needs `repo` (read) + `copilot` scope for Copilot engine |
+| `ANALYSIS_ENGINE` | No | `COPILOT` | `COPILOT` or `STATIC` |
+| `OUTPUT_DIR` | No | `<tmpdir>/repo-doc-gen` | Directory for generated artefacts |
 | `MAX_DEPTH` | No | `5` | Maximum AST traversal depth |
 
-### GitHub Copilot (engine = COPILOT)
+### GitHub Copilot
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `COPILOT_TOKEN_URL` | No | `https://api.github.com/copilot_internal/v2/token` | Token exchange URL — override for GHES |
+| `COPILOT_TOKEN_URL` | No | `https://api.github.com/copilot_internal/v2/token` | Override for GHES |
 | `COPILOT_COMPLETIONS_URL` | No | `https://api.githubcopilot.com/chat/completions` | Completions endpoint |
-| `COPILOT_MODEL` | No | `gpt-4o` | Copilot model identifier |
+| `COPILOT_MODEL` | No | `gpt-4o` | Model identifier |
 | `COPILOT_MAX_TOKENS` | No | `4096` | Max tokens per completion |
-
-### Anthropic Claude (engine = CLAUDE)
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `ANTHROPIC_API_KEY` | **Yes** (when `engine=CLAUDE`) | — | Anthropic API key |
 
 ### Database
 
@@ -136,8 +170,8 @@ The completions endpoint (`COPILOT_COMPLETIONS_URL`) typically stays as the defa
 | `DB_DRIVER` | No | `org.h2.Driver` | JDBC driver class |
 | `DB_USER` | No | `sa` | Database username |
 | `DB_PASS` | No | *(empty)* | Database password |
-| `DDL_AUTO` | No | `update` | Hibernate DDL strategy (`validate` recommended in production) |
-| `HIBERNATE_DIALECT` | No | `org.hibernate.dialect.H2Dialect` | Set to `org.hibernate.dialect.PostgreSQLDialect` for PostgreSQL |
+| `DDL_AUTO` | No | `update` | Hibernate DDL strategy |
+| `HIBERNATE_DIALECT` | No | `org.hibernate.dialect.H2Dialect` | Set to `PostgreSQLDialect` for Postgres |
 
 ### Admin / Security
 
@@ -150,94 +184,36 @@ The completions endpoint (`COPILOT_COMPLETIONS_URL`) typically stays as the defa
 
 ## API Reference
 
-All endpoints live under `/api/v1`. The SPA at `/` calls these automatically.
+All endpoints under `/api/v1`. The SPA calls these automatically.
 
 ### Documentation Generation
 
-#### Submit a job
-
 ```
 POST /api/v1/analyse
-Content-Type: application/json
+{ "repoUrl": "https://github.com/org/repo", "branch": "main" }
 
-{
-  "repoUrl": "https://github.com/org/repo",
-  "branch": "main"
-}
+GET  /api/v1/jobs/{id}               → job status (QUEUED → RUNNING → DONE | FAILED)
+GET  /api/v1/jobs/{id}/docs          → business logic Markdown
+GET  /api/v1/jobs/{id}/hierarchy     → method call hierarchy Markdown
+GET  /api/v1/jobs/{id}/gherkin       → feature files + step definitions (ZIP)
+GET  /api/v1/jobs/{id}/integrations  → integration topology JSON
 ```
 
-Response:
-```json
-{
-  "id": "a1b2c3d4-...",
-  "status": "QUEUED",
-  "repoUrl": "https://github.com/org/repo",
-  "branch": "main",
-  "createdAt": "2026-01-15T09:30:00Z"
-}
-```
-
-#### Poll job status
-
-```
-GET /api/v1/jobs/{id}
-```
-
-Status values: `QUEUED` → `RUNNING` → `DONE` | `FAILED`
-
-#### Download artefacts (once status = DONE)
-
-```
-GET /api/v1/jobs/{id}/docs          → Business logic Markdown
-GET /api/v1/jobs/{id}/hierarchy     → Method call hierarchy Markdown
-GET /api/v1/jobs/{id}/gherkin       → Feature files + step definitions (ZIP)
-GET /api/v1/jobs/{id}/integrations  → Integration topology JSON
-```
+Local folder: use the absolute path as `repoUrl` (e.g. `"/Users/me/my-service"`).
 
 ### QA Coverage Analysis
 
-#### Submit a coverage comparison job
-
 ```
 POST /api/v1/coverage/compare
-Content-Type: application/json
-
 {
-  "devRepoUrl": "https://github.com/org/service",
+  "devRepoUrl": "https://github.com/org/service",   // or local path
   "devBranch": "main",
-  "qaRepoUrl": "https://github.com/org/service-tests",
-  "qaBranch": "main"
+  "qaRepoUrl":  "https://github.com/org/service-bdd",  // or local path
+  "qaBranch":  "main"
 }
-```
 
-#### Poll coverage job
-
-```
-GET /api/v1/coverage/jobs/{id}
-```
-
-#### Get the coverage report
-
-```
-GET /api/v1/coverage/jobs/{id}/report
-```
-
-Response shape:
-```json
-{
-  "summary": "62% of testable classes have full or partial coverage.",
-  "score": 62,
-  "classes": [
-    {
-      "className": "OrderService",
-      "status": "PARTIAL",
-      "coveredMethods": ["createOrder", "cancelOrder"],
-      "missedMethods": ["updateOrder"],
-      "explanation": "Happy-path order creation and cancellation are covered. Update path has no QA scenario.",
-      "suggestedGherkin": "Scenario: Update order details\n  Given an existing order..."
-    }
-  ]
-}
+GET  /api/v1/coverage/jobs/{id}         → job status
+GET  /api/v1/coverage/jobs/{id}/report  → full coverage report JSON
 ```
 
 ---
@@ -246,8 +222,7 @@ Response shape:
 
 ### Feature files
 
-Standard Gherkin (`.feature`) with scenarios covering:
-
+Standard Gherkin (`.feature`) scenarios covering:
 - Happy path
 - Validation / bad input (HTTP 400)
 - Authentication failure (HTTP 401)
@@ -258,11 +233,11 @@ Standard Gherkin (`.feature`) with scenarios covering:
 
 ### Step definition classes
 
-One Java class per feature, with conditional imports and typed helpers based on the integrations detected in the repo:
+One Java class per feature, with typed helpers based on detected integrations:
 
 | Integration detected | Generated helper |
 |---|---|
-| JPA / JdbcTemplate | `JdbcTemplate` setup and teardown |
+| JPA / JdbcTemplate | `JdbcTemplate` setup / teardown |
 | Kafka | `@EmbeddedKafka` + `KafkaTestUtils` consumer |
 | S3 / AmazonS3 | `@MockBean S3Client` with Mockito stubs |
 | Cache / Redis | `CacheManager` injection |
@@ -273,25 +248,7 @@ Classes are annotated with `@CucumberContextConfiguration`, `@SpringBootTest`, a
 
 ---
 
-## QA Coverage Analysis
-
-The coverage analyser fetches test files from the QA repo matching any of:
-
-`*Test.java`, `*Tests.java`, `*Spec.java`, `*IT.java`, `*Steps.java`, `*StepDefs.java`, `*StepDefinitions.java`, `*TestCase.java`, `*E2ETest.java`, `*IntegrationTest.java`, `*.feature`
-
-Coverage matching uses three layers to avoid false MISSED reports from natural-language Gherkin:
-
-1. **camelCase word segments** — `createOrder` splits to `[create, order]`; both must appear in the Gherkin scenario text
-2. **Verb synonym groups** — `create`, `add`, `place`, `submit`, `save`, `register` all match `createOrder`; `get`, `find`, `fetch`, `load`, `retrieve`, `list` all match `findById`
-3. **Step definition annotation scanning** — `@When`, `@Given`, `@Then` annotation values are scanned directly; method body is also checked for `.methodName(` calls
-
-The score formula excludes `NOT_NEEDED` classes (DTOs, `@Configuration`, simple getters/setters, exception subclasses) from the denominator.
-
----
-
 ## Production Deployment
-
-### Build
 
 ```bash
 mvn clean package -DskipTests
@@ -312,15 +269,12 @@ export DDL_AUTO=validate
 export HIBERNATE_DIALECT=org.hibernate.dialect.PostgreSQLDialect
 ```
 
-Use Flyway or Liquibase for schema migrations in production (`DDL_AUTO=validate`).
-
 ### Health check
 
 ```
 GET /actuator/health
+GET /actuator/prometheus
 ```
-
-Prometheus metrics: `GET /actuator/prometheus`
 
 Actuator endpoints require Basic Auth (`ADMIN_USER` / `ADMIN_PASS`).
 
@@ -338,82 +292,38 @@ Actuator endpoints require Basic Auth (`ADMIN_USER` / `ADMIN_PASS`).
 │          AnalysisController   CoverageController         │
 └──────────┬─────────────────────────┬─────────────────────┘
            │ @Async                  │ @Async
-┌──────────▼──────────┐   ┌─────────▼──────────────────┐
-│  RepoDocumentation  │   │  CoverageComparisonService  │
-│  Service            │   │                             │
-└──────────┬──────────┘   └─────────┬──────────────────┘
+┌──────────▼──────────┐   ┌──────────▼─────────────────────┐
+│  RepoDocumentation  │   │  CoverageComparisonService      │
+│  Service            │   │                                 │
+└──────────┬──────────┘   └──────────┬──────────────────────┘
            │                         │
-┌──────────▼─────────────────────────▼──────────────────┐
-│                 LlmClient (interface)                  │
-│                                                        │
-│  GitHubCopilotClient     ClaudeAgentClient             │
-│  (default / GHES)        (engine=CLAUDE only)          │
-│                                                        │
-│  StaticEngine (JavaParser AST — no LLM, offline)       │
-└──────────┬─────────────────────────┬──────────────────┘
+┌──────────▼─────────────────────────▼──────────────────────┐
+│                 LlmClient (interface)                      │
+│   GitHubCopilotClient (default · GHES)                    │
+│   StaticEngine (JavaParser AST — offline, no LLM)         │
+└──────────┬─────────────────────────┬──────────────────────┘
            │                         │
-┌──────────▼──────┐       ┌──────────▼──────────┐
-│ GitHubRepoFetcher│       │   QARepoFetcher     │
-│ (*.java files)  │       │   (test files only) │
-└──────────┬──────┘       └──────────┬──────────┘
+┌──────────▼──────────┐   ┌──────────▼──────────────────────┐
+│  GitHubRepoFetcher  │   │  QARepoFetcher                  │
+│  LocalRepoFetcher   │   │  LocalRepoFetcher               │
+└──────────┬──────────┘   └──────────┬──────────────────────┘
            │                         │
-┌──────────▼─────────────────────────▼──────────────────┐
-│               GitHub REST API v3                       │
-│         git/trees · git/blobs · rate-limit             │
-└────────────────────────────────────────────────────────┘
+┌──────────▼─────────────────────────▼──────────────────────┐
+│         GitHub REST API v3  OR  local filesystem           │
+└────────────────────────────────────────────────────────────┘
 ```
 
-**Multi-agent pipeline (AI modes)**
-
-```
-Tier 1 (parallel):
-  BusinessLogicAgent
-  MethodHierarchyAgent  →  Tier 2: GherkinAgent
-  IntegrationAgent
-
-Coverage:
-  CoverageComparisonAgent (dev classes × QA test files)
-```
-
-**Static mode** replaces all agents with:
+**Static mode pipeline:**
 
 ```
 JavaAstParser → ParsedClass / ParsedMethod
-  └─ StaticBusinessLogicExtractor   (flows, triggers, invariants)
-  └─ StaticIntegrationDetector      (DB / Kafka / S3 / Cache / HTTP)
-  └─ StaticMethodHierarchyBuilder   (call graph)
-  └─ TemplateGherkinGenerator       (feature + step def from templates)
-  └─ StaticCoverageAnalyser         (synonym + annotation matching)
-```
-
----
-
-## Project Structure
-
-```
-src/
-├── main/
-│   ├── java/com/repoinsight/
-│   │   ├── agent/              # AI sub-agents (BusinessLogic, MethodHierarchy, Integration, Gherkin, Coverage)
-│   │   ├── claude/             # Anthropic SDK wrapper (ClaudeAgentClient — optional)
-│   │   ├── llm/                # LlmClient interface + GitHubCopilotClient (default)
-│   │   ├── config/             # Spring config (WebClient, Anthropic, async executor, SystemInfoLogger)
-│   │   ├── controller/         # REST API controllers
-│   │   ├── coverage/           # Coverage comparison service + QARepoFetcher
-│   │   ├── github/             # GitHub API client + secret scrubber
-│   │   ├── service/            # Job orchestration (JPA-backed)
-│   │   └── static_analysis/    # JavaParser AST engine (StaticEngine, parsers, generators)
-│   └── resources/
-│       ├── application.yml
-│       └── static/index.html   # SPA (no build step)
-└── test/
-    └── java/com/repoinsight/
-        ├── static_analysis/
-        │   ├── JavaAstParserTest.java
-        │   ├── StaticIntegrationDetectorTest.java
-        │   └── StaticBusinessLogicExtractorTest.java
-        └── coverage/service/
-            └── StaticCoverageAnalyserTest.java
+  └─ StaticBusinessLogicExtractor
+  └─ StaticIntegrationDetector
+  └─ StaticMethodHierarchyBuilder
+  └─ TemplateGherkinGenerator
+  └─ StaticCoverageAnalyser
+       └─ BddQaAnalyser   (Phase 1: full BDD index)
+       └─ DeepBddMatcher  (Phase 2: semantic method matching)
 ```
 
 ---
@@ -421,19 +331,12 @@ src/
 ## Development & Tests
 
 ```bash
-# Run unit tests (H2 in-memory, no Docker required)
+# Unit tests — H2 in-memory, no Docker required
 mvn test
 
 # Full verify including integration tests (requires Docker for Testcontainers)
 mvn verify
 ```
-
-Test coverage includes:
-
-- `JavaAstParserTest` — layer detection, method/field parsing, class metadata, edge cases
-- `StaticIntegrationDetectorTest` — DB (JPA/JdbcTemplate), Kafka, S3, Cache, HTTP, third-party SDK detection
-- `StaticBusinessLogicExtractorTest` — flow trigger detection, step derivation, invariants, side effects
-- `StaticCoverageAnalyserTest` — COVERED/PARTIAL/MISSED/NOT_NEEDED logic, synonym matching, score formula, suggested Gherkin
 
 ---
 
@@ -441,11 +344,11 @@ Test coverage includes:
 
 | Concern | What is done |
 |---|---|
-| Secret scrubbing | All source fetched from GitHub is scanned against configurable regex patterns before any LLM call; credentials and tokens are replaced with `[REDACTED]` |
-| Data residency | Source is processed in-memory and in `OUTPUT_DIR` only; nothing is sent to any third party beyond the configured LLM endpoint |
-| Default credentials | `admin` / `changeme` out of the box — **override `ADMIN_USER` and `ADMIN_PASS` for any non-local deployment** |
-| CSRF | Disabled for the stateless REST API; re-enable if you add session-based authentication |
-| File size limits | Per-file cap at 100 KB; per-repo cap at 500 files — prevents runaway memory usage on very large monorepos |
+| Secret scrubbing | All source fetched from GitHub is scanned against configurable regex patterns before any LLM call; credentials are replaced with `[REDACTED]` |
+| Data residency | Source is processed in-memory and in `OUTPUT_DIR` only; nothing is sent beyond the configured LLM endpoint |
+| Default credentials | `admin` / `changeme` — **override `ADMIN_USER` and `ADMIN_PASS` for any non-local deployment** |
+| CSRF | Disabled for the stateless REST API |
+| File size limits | 100 KB per file, 500 files per repo — prevents runaway memory usage |
 
 ---
 
@@ -453,10 +356,10 @@ Test coverage includes:
 
 | Parameter | Default | Config key |
 |---|---|---|
-| Files fetched per repo | 500 | `github.max-files-per-repo` |
+| Files per repo | 500 | `github.max-files-per-repo` |
 | Max file size | 100 KB | `github.max-file-size-bytes` |
-| Concurrent GitHub fetches | 8 | hardcoded concurrency in `Flux.flatMap(…, 8)` |
-| LLM timeout | 120 s | `github.copilot.timeout-seconds` / `anthropic.timeout-seconds` |
+| Concurrent GitHub fetches | 8 | `Flux.flatMap(…, 8)` |
+| LLM timeout | 120 s | `github.copilot.timeout-seconds` |
 | Async thread pool | 4 core / 20 max / 100 queue | `spring.task.execution.pool.*` |
 | Analysis cache TTL | 60 min | `analysis.cache-ttl-minutes` |
 
