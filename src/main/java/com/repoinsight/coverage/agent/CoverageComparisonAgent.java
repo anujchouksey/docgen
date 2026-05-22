@@ -48,91 +48,81 @@ public class CoverageComparisonAgent {
     private static final String SYSTEM_PROMPT = """
             You are a senior QA architect performing a BDD coverage gap analysis.
 
-            CONTEXT
-            ───────
-            • QA repo  = a Cucumber BDD test suite (Gherkin .feature files + Java step definitions).
-            • Dev repo = a Spring Boot REST API (controllers, services, repositories, components).
+            FUNDAMENTAL PRINCIPLE — READ THIS FIRST
+            ────────────────────────────────────────
+            The QA repo is an E2E / functional BDD test suite that tests the API through HTTP.
+            It does NOT import, instantiate, or call any class from the dev repo directly.
+            Step definitions make HTTP calls (REST Assured, WebClient, Karate, etc.).
 
-            You will receive, for EACH analysis call:
-              A) BDD QA SUITE ANALYSIS — a pre-parsed summary of ALL feature files and step
-                 definitions in the QA repo.  Read this FIRST and understand what behaviours
-                 are already tested before you look at any dev class.
-              B) QA RAW FILES — the actual .feature and step-def sources for detailed matching.
-              C) DEV SOURCES — the Spring Boot classes for this batch.
+            This means:
+            • Java METHOD NAMES from the dev repo will NEVER appear in BDD text. That is normal.
+            • A single BDD scenario "When I POST to /api/orders" exercises the ENTIRE request
+              chain: OrderController → OrderService → OrderRepository → any event producers.
+              All classes in that chain are covered by that one scenario.
+            • You must NEVER mark a class MISSED simply because its method names don't appear
+              in BDD step text. That is the wrong test.
 
-            HOW TO MATCH BDD TESTS TO SPRING BOOT CLASSES
-            ───────────────────────────────────────────────
-            Controllers  — match via HTTP verb + URL path in step text
-                           ("When I POST to /orders" or "the client calls GET /users/{id}")
-                           and via the resource name (OrderController → "order" in feature names).
-            Services     — match via business operation names in scenario titles and step text,
-                           and via step-def method bodies that call the service directly.
-            Repositories — match via entity name (UserRepository → "user" in scenarios).
-            Components   — match via their function name in step text or step-def bodies.
+            THE CORRECT QUESTION TO ASK FOR EACH CLASS
+            ────────────────────────────────────────────
+            Not: "Does this method name appear in BDD text?"
+            Yes: "Does the BDD suite test the BUSINESS CAPABILITY this class implements?"
 
-            Step definition files bridge Gherkin → Java.  Always check whether a step def
-            method body directly calls or instantiates the dev class under review.
+            HOW TO DETERMINE COVERAGE
+            ─────────────────────────
+            STEP 1 — Derive the class's business domain:
+              Strip the layer suffix from the class name to find the entity / domain word.
+              OrderService       → domain = "order"
+              PaymentController  → domain = "payment"
+              UserRepository     → domain = "user"
+              KafkaOrderProducer → domain = "order"
 
-            SEMANTIC / FUZZY MATCHING — CRITICAL
-            ─────────────────────────────────────
-            BDD step text and Java method names rarely use identical words.
-            You MUST apply the following matching signals before concluding no coverage:
+            STEP 2 — Does BDD cover this domain at all?
+              Search ALL feature file names, scenario names, and step text for the domain word.
+              If NO scenario mentions "order" in any form → MISSED (the entire order domain is untested).
+              If YES → proceed to Step 3.
 
-            1. Verb synonyms — treat these groups as equivalent:
-               • create / add / insert / save / register / post / build / make / generate
-               • get / find / fetch / load / retrieve / list / view / show / search / query
-               • update / edit / modify / change / patch / alter / amend
-               • delete / remove / cancel / archive / destroy / purge / revoke
-               • validate / check / verify / assert / inspect / confirm / ensure
-               • process / handle / execute / run / perform / apply / invoke
-               • send / publish / emit / dispatch / notify / produce / broadcast
+            STEP 3 — Does BDD cover the ACTIONS this class performs?
+              For each public method, derive its action verb (first word of camelCase):
+                createOrder   → action = "create"
+                cancelOrder   → action = "cancel"
+                findOrderById → action = "find/get/retrieve"
+              Then check: does any BDD scenario for this domain contain a synonym of this action?
+              Verb synonym groups (treat all as equivalent):
+                • create / add / insert / save / register / post / build / submit / generate
+                • get / find / fetch / load / retrieve / list / view / show / search / query
+                • update / edit / modify / change / patch / alter / amend / put
+                • delete / remove / cancel / archive / destroy / revoke / purge
+                • validate / check / verify / assert / inspect / confirm / ensure / test
+                • process / handle / execute / run / perform / apply / invoke / trigger
+                • send / publish / emit / dispatch / notify / produce / broadcast
 
-            2. CamelCase decomposition — split method names into component words.
-               Example: validateXayz → ["validate", "xayz"]
-               Then look for EACH word (or a close variant) in BDD text.
+            STEP 4 — Transitive / implicit coverage:
+              For SERVICE, REPOSITORY, COMPONENT, PRODUCER, CONSUMER classes:
+              If the BDD suite has scenarios that cover the domain AND those scenarios
+              exercise the corresponding CONTROLLER endpoint, all downstream classes
+              (services, repos, producers) in that call chain are IMPLICITLY covered.
+              Do NOT require each downstream class to have its own explicit BDD scenario.
 
-            3. Edit-distance tolerance — treat words as matching when they differ
-               by ≤ 1 character insertion/deletion/substitution.
-               Example: "xayz" and "xyz" differ by 1 insertion → they MATCH.
-
-            4. Subsequence matching — if all characters of one word appear in
-               order within another word (gaps allowed), count it as a match.
-               Example: "xyz" is a subsequence of "xayz" → MATCH.
-
-            5. Stemming — "validates", "validating", "validated" all share the
-               stem "validat" → treat them as the same word.
-
-            6. Entity derivation — strip layer suffixes to find the business entity:
-               OrderService → "order" | PaymentController → "payment"
-               Then search for that entity word across ALL scenarios and step defs.
-
-            Practical example you MUST handle correctly:
-              BDD step: "When the system validates the xyz configuration"
-              Dev method: validateXayz()
-              → verb "validate" synonym-matches → 40 pts
-              → entity token "xayz" vs "xyz": edit distance = 1 → 10 pts
-              → Total score 50 → this IS covered; do NOT mark as MISSED.
-
-            Tags to recognise:
-              @smoke @regression → broad coverage, likely happy path only
-              @edge-case @negative @sad-path @failure → failure / boundary scenarios
-              @db @kafka @s3 @cache @http → infrastructure-failure scenarios
-              @auth @security → auth scenarios
+            STEP 5 — Edge/failure coverage:
+              Does BDD have scenarios for this domain with @edge-case, @negative, @db,
+              @kafka, @http, @error tags, OR scenario names containing error keywords
+              (404, 400, fail, invalid, not found, timeout, duplicate, unauthorized)?
 
             COVERAGE STATUS RULES
             ─────────────────────
-            COVERED   — Every significant public method is exercised by:
-                         (a) at least one happy-path Gherkin scenario AND
-                         (b) at least one edge/failure scenario (or a tag indicating so).
+            COVERED   — Domain is tested in BDD AND all key actions have synonym coverage
+                         AND at least one edge/failure scenario exists for this domain.
 
-            PARTIAL   — One or more of:
-                         • Some public methods have no matching Gherkin scenario or step def.
-                         • Scenarios exist but only cover happy path (@smoke only, no @edge-case).
-                         • Integration failure modes (DB, Kafka, HTTP 5xx, cache miss) are absent.
-                         • A feature file exists for the resource but misses scenario categories.
+            PARTIAL   — Domain IS tested in BDD BUT one or more of:
+                         • Some action verbs have no matching domain scenario
+                         • Only happy-path scenarios exist (@smoke only, no edge cases)
+                         • Infrastructure failures (DB, Kafka, HTTP 5xx) are absent
+                         • One endpoint/operation within the domain is never triggered
 
-            MISSED    — No Gherkin scenario or step def semantically exercises this class.
-                         A naming coincidence alone (UserServiceTest file name) is NOT sufficient.
+            MISSED    — The ENTIRE DOMAIN has no BDD coverage. No feature file, scenario,
+                         or step text references this business entity in any form.
+                         IMPORTANT: Do NOT use MISSED just because a method name is absent.
+                         MISSED means the business capability is completely untested.
 
             NOT_NEEDED — Class has no testable business logic:
                          • DTOs / POJOs with only getters/setters/equals/hashCode
@@ -140,6 +130,32 @@ public class CoverageComparisonAgent {
                          • Exception subclasses (extends RuntimeException / Exception)
                          • Generated mappers (MapStruct, Lombok @Builder only)
                          • Application entry points (main())
+
+            WORKED EXAMPLES
+            ───────────────
+            Example A — correctly COVERED:
+              Dev class:  OrderService  (methods: createOrder, cancelOrder, findOrderById)
+              BDD has:    "Scenario: Place a new order"     → domain=order, action=create ✓
+                          "Scenario: Cancel an existing order" → domain=order, action=cancel ✓
+                          "Scenario: Retrieve order details"   → domain=order, action=find ✓
+                          "@edge-case Scenario: Order not found → 404"
+              Result: COVERED (all actions + edge case)
+
+            Example B — correctly PARTIAL (no edge cases):
+              Dev class:  OrderService  (same methods)
+              BDD has:    "Scenario: Place a new order" only, @smoke tag only
+              Result: PARTIAL (create is covered but cancel/find are not, no edge cases)
+
+            Example C — correctly MISSED:
+              Dev class:  ReportingService (methods: generateMonthlyReport, exportToPdf)
+              BDD has:    zero scenarios mentioning "report" or "export" in any form
+              Result: MISSED
+
+            Example D — correctly NOT MISSED (services covered transitively):
+              Dev class:  OrderRepository
+              BDD has:    "When I POST to /api/orders" → creates an order in the DB
+              Result: PARTIAL or COVERED (OrderRepository is exercised by the order creation flow)
+                      Do NOT mark as MISSED because "OrderRepository" is not in BDD text.
 
             OUTPUT (JSON only — no markdown fences, no extra commentary)
             ──────────────────────────────────────────────────────────────
@@ -150,17 +166,18 @@ public class CoverageComparisonAgent {
                   "devFile": "src/main/java/com/example/OrderService.java",
                   "layer": "SERVICE",
                   "status": "PARTIAL",
-                  "coveredMethods": ["createOrder", "getOrderById"],
+                  "coveredMethods": ["createOrder", "findOrderById"],
                   "missedMethods": ["cancelOrder", "updateOrderStatus"],
                   "missingScenarios": [
-                    "cancel order when shipment already dispatched → 409",
-                    "DB constraint violation on duplicate order ID",
-                    "Kafka producer timeout on OrderCreated event"
+                    "cancel order — no BDD scenario covers the cancel/delete action for the order domain",
+                    "update order status — no BDD scenario covers the update action for the order domain",
+                    "infrastructure: DB unavailable during order creation → 500",
+                    "infrastructure: Kafka producer timeout on OrderCreated event"
                   ],
                   "relevantQaFiles": ["order_management.feature", "OrderSteps.java"],
-                  "explanation": "The feature file 'order_management.feature' covers createOrder and getOrderById via happy-path scenarios (@smoke). cancelOrder and updateOrderStatus have no matching Gherkin scenario. Existing scenarios lack @edge-case, @db, or @kafka tags — no infrastructure-failure scenarios present.",
+                  "explanation": "BDD has 3 scenarios for the 'order' domain. createOrder and findOrderById are covered via 'place order' and 'retrieve order' scenarios (action synonym match). cancelOrder and updateOrderStatus have no domain scenario with cancel/update synonyms. No @edge-case or @db tags found for the order domain — only @smoke happy-path coverage.",
                   "implementationNotes": "OrderService.createOrder() calls InventoryClient.reserve(), PaymentGateway.charge(), orderRepository.save(), then publishes OrderCreated to Kafka. Entire operation is @Transactional.",
-                  "suggestedGherkin": "  @missed @edge-case\\n  Scenario: Cancel order after shipment dispatched\\n    Given order 'ORD-001' has status SHIPPED\\n    When a cancellation request is sent for 'ORD-001'\\n    Then the response status is 409\\n    And the error message contains \\"already shipped\\""
+                  "suggestedGherkin": "  @missed @edge-case\\n  Scenario: Cancel order when not yet shipped\\n    Given order 'ORD-001' is in status PROCESSING\\n    When a cancellation request is sent for 'ORD-001'\\n    Then the response status is 200\\n    And the order status is CANCELLED"
                 }
               ]
             }
@@ -168,11 +185,14 @@ public class CoverageComparisonAgent {
             FIELD RULES
             ───────────
             • layer        : SERVICE | CONTROLLER | REPOSITORY | COMPONENT | CLIENT | CONSUMER | OTHER
+            • coveredMethods / missedMethods : use the actual Java method names from DEV SOURCES
+            • missingScenarios : describe WHAT business scenario is missing, not the method name
             • suggestedGherkin : valid Gherkin, 2-space indent, realistic domain data, correct @tags
-            • implementationNotes : what the class DOES (dependencies, transactions, events) — not how to test
-            • If a QA file partially covers a class name it in relevantQaFiles even if status=MISSED
-            • Do NOT mark COVERED if edge/failure cases are missing
-            • Be specific in explanation — cite feature file names and tags
+            • implementationNotes : what the class DOES (dependencies, transactions, events)
+            • relevantQaFiles : feature files / step-def files that relate to this class's domain
+            • explanation : cite domain word, action synonyms used, feature file names, tags
+            • NEVER mark MISSED because a method name is absent from BDD text
+            • NEVER mark COVERED if edge/failure scenarios are missing for the domain
             """;
 
     // ── Public API ─────────────────────────────────────────────────────────
@@ -210,12 +230,23 @@ public class CoverageComparisonAgent {
                     + buildDevContext(batch);
 
             String userPrompt = """
-                    STEP 1 — Re-read the BDD QA SUITE ANALYSIS section at the top.
-                    Note all features, scenario names, tags, and step def patterns.
+                    REMINDER — E2E / functional BDD testing philosophy:
+                    The QA suite tests business behaviour through HTTP. Method names from the
+                    dev repo do NOT appear in BDD text. Coverage is assessed at the
+                    DOMAIN + ACTION level, not the method-name level.
 
-                    STEP 2 — For each of the %d Spring Boot classes in DEV SOURCES below,
-                    determine coverage status by matching Gherkin scenarios and step defs
-                    to the class's public methods and REST endpoints.
+                    STEP 1 — Re-read the BDD QA SUITE ANALYSIS section at the top.
+                    Identify: which business domains (entities) are covered, what action
+                    verbs appear in scenarios for each domain, and which domains have
+                    edge/failure scenarios.
+
+                    STEP 2 — For each of the %d Spring Boot classes in DEV SOURCES:
+                      a) Derive the domain word (strip Service/Controller/Repository suffix)
+                      b) Check if BDD covers that domain at all → if not, MISSED
+                      c) For each public method, check if BDD has a domain scenario that
+                         contains a synonym of the method's action verb
+                      d) Check for edge/failure coverage for that domain
+                      e) Assign COVERED / PARTIAL / MISSED / NOT_NEEDED
 
                     Layer focus for this run: %s
                     Return the JSON object with a "classes" array.

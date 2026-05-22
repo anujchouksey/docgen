@@ -8,6 +8,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.Locale;
 
 /**
  * Phase-1 BDD QA repo analyser.
@@ -294,6 +295,48 @@ public class BddQaAnalyser {
         }
 
         public boolean isEmpty() { return scenarios.isEmpty() && stepDefs.isEmpty(); }
+
+        // ── Domain-level coverage queries (E2E / functional BDD) ───────────
+
+        /**
+         * Returns true if ANY BDD scenario or step-def text mentions this
+         * business domain word.
+         *
+         * <p>Used for E2E / functional BDD repos where step text describes
+         * business behaviour ("When I submit an order") rather than Java method
+         * names ("createOrder").  If the domain word "order" appears in at least
+         * one scenario or step def, the domain is considered covered.</p>
+         */
+        public boolean coversDomain(String domain) {
+            if (domain == null || domain.isBlank()) return false;
+            String dl = domain.toLowerCase(Locale.ROOT);
+            return scenarios.stream().anyMatch(s -> s.allText().contains(dl))
+                    || stepDefs.stream().anyMatch(sd ->
+                            sd.pattern().toLowerCase(Locale.ROOT).contains(dl)
+                            || sd.body().toLowerCase(Locale.ROOT).contains(dl));
+        }
+
+        /**
+         * Returns true if at least one BDD scenario that mentions the given
+         * domain is also classified as an edge / failure case.
+         */
+        public boolean hasEdgeCasesForDomain(String domain) {
+            if (domain == null || domain.isBlank()) return false;
+            String dl = domain.toLowerCase(Locale.ROOT);
+            return scenarios.stream()
+                    .filter(s -> s.allText().contains(dl))
+                    .anyMatch(FeatureScenario::isEdgeCase);
+        }
+
+        /**
+         * Returns all scenarios that mention the given domain word.
+         * Used to count domain-level BDD coverage depth.
+         */
+        public List<FeatureScenario> scenariosForDomain(String domain) {
+            if (domain == null || domain.isBlank()) return List.of();
+            String dl = domain.toLowerCase(Locale.ROOT);
+            return scenarios.stream().filter(s -> s.allText().contains(dl)).toList();
+        }
 
         /**
          * Produces a concise human-readable summary for use in LLM prompts.

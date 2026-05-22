@@ -17,6 +17,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.Locale;
 
 /**
  * AST-based coverage analysis — zero AI, zero API calls, works offline.
@@ -100,8 +101,32 @@ public class StaticCoverageAnalyser {
 
     // ── Per-class analysis ─────────────────────────────────────────────────
 
+    /**
+     * Determines BDD coverage for a single dev class.
+     *
+     * <h3>Core design principle — functional / E2E compatibility</h3>
+     * <p>A BDD QA suite written against a REST API tests <em>business behaviour</em>,
+     * not implementation details.  A single scenario "When I POST to /api/orders"
+     * exercises {@code OrderController}, {@code OrderService}, {@code OrderRepository},
+     * and any downstream producers in one shot — none of those class or method names
+     * ever appear in the Gherkin text.</p>
+     *
+     * <p>Therefore coverage is assessed in two stages:</p>
+     * <ol>
+     *   <li><b>Domain level</b> — does ANY BDD scenario mention the business entity
+     *       (domain word) that this class is responsible for?  If no → MISSED.
+     *       If yes → proceed to stage 2.</li>
+     *   <li><b>Action level</b> — for each public method, does ANY domain-level BDD
+     *       scenario also contain a synonym of the action verb the method performs?
+     *       ({@code createOrder} → action={@code create} → does any "order" scenario
+     *       mention create / add / save / submit / post …?)</li>
+     * </ol>
+     *
+     * <p>Method names are <em>never</em> looked up directly in BDD text.</p>
+     */
     private ClassCoverageReport analyseClass(ParsedClass cls, QaIndex qaIndex, BddQaIndex bddIndex) {
-        // NOT_NEEDED detection
+
+        // ── NOT_NEEDED fast exit ───────────────────────────────────────────
         if (isNotNeeded(cls)) {
             return ClassCoverageReport.builder()
                     .devClass(cls.getSimpleName()).devFile(cls.getFilePath()).layer(cls.getLayer())
@@ -114,9 +139,6 @@ public class StaticCoverageAnalyser {
                     .build();
         }
 
-        // Find matching QA files via combined Java-AST + BDD-entity lookup
-        List<String> matchedQaFiles = qaIndex.findMatchingFiles(cls.getSimpleName());
-
         List<ParsedMethod> publicMethods = cls.getMethods().stream()
                 .filter(m -> m.isPublic() && !m.isStatic() && !isObjectMethod(m.getName()))
                 .toList();
@@ -125,77 +147,157 @@ public class StaticCoverageAnalyser {
             return notNeeded(cls, "No public instance methods to test.");
         }
 
-        if (matchedQaFiles.isEmpty()) {
-            // MISSED — no QA file or BDD scenario references this class
-            List<String> missed = publicMethods.stream().map(ParsedMethod::signature).toList();
-            List<String> suggestions = buildMissingScenarios(cls, publicMethods, List.of());
+        // ── Stage 1: domain-level check ────────────────────────────────────
+        // Derive the single business entity word this class owns.
+        // OrderService → "order" | PaymentController → "payment" | UserRepository → "user"
+        String domain = QaIndex.deriveEntity(cls.getSimpleName());
+
+        boolean domainCoveredInBdd = bddIndex.coversDomain(domain);
+
+        // Also check via Java-AST class-reference matching (step defs that import/call this class)
+        List<String> matchedQaFiles = qaIndex.findMatchingFiles(cls.getSimpleName());
+        boolean hasDirectQaRef = !matchedQaFiles.isEmpty();
+
+        if (!domainCoveredInBdd && !hasDirectQaRef) {
+            // The entire business domain of this class has NO BDD coverage whatsoever.
+            // In E2E testing this is the only meaningful MISSED signal.
+            List<String> missedSigs   = publicMethods.stream().map(ParsedMethod::signature).toList();
+            List<String> suggestions  = buildMissingScenarios(cls, publicMethods, List.of());
             return ClassCoverageReport.builder()
                     .devClass(cls.getSimpleName()).devFile(cls.getFilePath()).layer(cls.getLayer())
                     .status(CoverageStatus.MISSED)
-                    .coveredMethods(List.of()).missedMethods(missed)
+                    .coveredMethods(List.of()).missedMethods(missedSigs)
                     .missingScenarios(suggestions).relevantQaFiles(List.of())
-                    .explanation("No Gherkin scenario or step definition references " + cls.getSimpleName()
-                            + " or its business entity. Neither by class name, REST path, nor derived entity word.")
+                    .explanation("The '" + domain + "' business domain has no BDD coverage. "
+                            + "No Gherkin scenario or step definition references this business "
+                            + "capability — not by entity name, HTTP path, or action verb.")
                     .implementationNotes(buildImplNotes(cls))
                     .suggestedGherkin(buildSuggestedGherkin(cls, publicMethods))
                     .build();
         }
 
-        // Method-level coverage check — raw QA text + BDD step defs
+        // ── Stage 2: action-level method coverage ──────────────────────────
+        // Domain IS covered by BDD.  For each public method check whether the
+        // ACTION it performs (its leading verb) is covered in domain scenarios.
+        //
+        // createOrder()  → action=create  → any "order" BDD scenario mentions create/add/save/post?
+        // cancelOrder()  → action=cancel  → any "order" BDD scenario mentions cancel/delete/remove?
+        // findOrderById()→ action=find    → any "order" BDD scenario mentions find/get/fetch/list?
+        //
+        // Method names are NEVER looked up in BDD text directly.
         Set<String> qaContent = qaIndex.contentOf(matchedQaFiles);
         List<String> covered  = new ArrayList<>();
         List<String> missed   = new ArrayList<>();
 
         for (ParsedMethod method : publicMethods) {
-            // Tier 1 — fast exact / synonym check on raw QA file content
-            boolean mentioned = isMethodMentioned(method.getName(), qaContent);
+            boolean actionCovered =
+                    // Primary: domain + action verb match in BDD (E2E-compatible)
+                    isActionCoveredInBdd(method.getName(), domain, bddIndex)
+                    // Fallback A: raw QA file content (step defs that directly call this method)
+                    || isMethodMentioned(method.getName(), qaContent)
+                    // Fallback B: deep semantic name matching (handles fuzzy variants)
+                    || deepBddMatcher.matches(method.getName(), bddIndex);
 
-            // Tier 2 — deep semantic matching across ALL BDD scenarios + step defs
-            //           covers cases like BDD "validate xyz" → dev method validateXayz
-            if (!mentioned) {
-                mentioned = deepBddMatcher.matches(method.getName(), bddIndex);
-                if (mentioned) {
-                    log.debug("DeepBddMatcher matched method '{}' in class '{}'",
-                            method.getName(), cls.getSimpleName());
-                }
+            if (actionCovered) {
+                covered.add(method.signature());
+            } else {
+                missed.add(method.signature());
+                log.debug("Action not found in BDD: method='{}' domain='{}' class='{}'",
+                        method.getName(), domain, cls.getSimpleName());
             }
-
-            if (mentioned) covered.add(method.signature());
-            else           missed.add(method.signature());
         }
 
-        // Edge-case detection: BDD tags take priority, then text heuristics
-        boolean hasEdgeCases = hasEdgeCaseScenariosInBdd(bddIndex, matchedQaFiles)
+        // ── Edge-case coverage ─────────────────────────────────────────────
+        boolean hasEdgeCases = bddIndex.hasEdgeCasesForDomain(domain)
+                || hasEdgeCaseScenariosInBdd(bddIndex, matchedQaFiles)
                 || hasEdgeCaseScenarios(qaContent);
 
+        // ── Status determination ───────────────────────────────────────────
         CoverageStatus status;
         if (missed.isEmpty() && hasEdgeCases) {
             status = CoverageStatus.COVERED;
-        } else if (covered.isEmpty()) {
-            status = CoverageStatus.MISSED;
         } else {
+            // Either some actions are missing, or edge cases are absent.
+            // With E2E testing, even if specific action verbs are not found,
+            // the class is exercised through the HTTP chain — so PARTIAL, not MISSED.
             status = CoverageStatus.PARTIAL;
         }
 
-        List<String> missingScenarios = buildMissingScenarios(cls,
-                missed.stream().map(s -> publicMethods.stream()
-                        .filter(m -> m.signature().equals(s)).findFirst().orElseThrow()).toList(),
-                matchedQaFiles);
-        if (!hasEdgeCases && status != CoverageStatus.MISSED) {
-            missingScenarios.add(0, "Edge/failure scenarios missing — BDD suite only has happy-path coverage "
-                    + "(add @edge-case @db @kafka @http scenarios)");
-            if (status == CoverageStatus.COVERED) status = CoverageStatus.PARTIAL;
+        // ── Missing scenario suggestions ───────────────────────────────────
+        List<ParsedMethod> missedMethods = missed.stream()
+                .map(sig -> publicMethods.stream()
+                        .filter(m -> m.signature().equals(sig)).findFirst().orElseThrow())
+                .toList();
+        List<String> missingScenarios = buildMissingScenarios(cls, missedMethods, matchedQaFiles);
+        if (!hasEdgeCases) {
+            missingScenarios = new ArrayList<>(missingScenarios);
+            missingScenarios.add(0,
+                    "No edge/failure scenarios found for the '" + domain + "' domain — "
+                    + "add @edge-case, @db, @kafka, @http, or @negative tagged scenarios "
+                    + "to achieve full coverage");
         }
+
+        // Merge feature files from BDD domain search with direct QA file matches
+        List<String> allRelevantQaFiles = new ArrayList<>(matchedQaFiles);
+        bddIndex.featureFilesMatching(domain).stream()
+                .filter(f -> !allRelevantQaFiles.contains(f)).forEach(allRelevantQaFiles::add);
+
+        long domainScenarioCount = bddIndex.scenariosForDomain(domain).size();
 
         return ClassCoverageReport.builder()
                 .devClass(cls.getSimpleName()).devFile(cls.getFilePath()).layer(cls.getLayer())
                 .status(status)
                 .coveredMethods(covered).missedMethods(missed)
-                .missingScenarios(missingScenarios).relevantQaFiles(matchedQaFiles)
-                .explanation(buildExplanation(cls, covered, missed, matchedQaFiles, hasEdgeCases, bddIndex))
+                .missingScenarios(missingScenarios).relevantQaFiles(allRelevantQaFiles)
+                .explanation(buildExplanation(cls, covered, missed, allRelevantQaFiles,
+                        hasEdgeCases, bddIndex, domain, domainScenarioCount))
                 .implementationNotes(buildImplNotes(cls))
-                .suggestedGherkin(missed.isEmpty() ? null : buildSuggestedGherkin(cls, publicMethods))
+                .suggestedGherkin(missed.isEmpty() ? null : buildSuggestedGherkin(cls, missedMethods))
                 .build();
+    }
+
+    // ── Action-level BDD coverage check (E2E-compatible) ──────────────────
+
+    /**
+     * Returns true when BDD scenarios that cover the given {@code domain} also
+     * exercise the <em>action</em> (leading verb) of the given method.
+     *
+     * <p>This replaces method-name look-up with <b>domain + action verb</b> matching,
+     * which is the only strategy that works for E2E BDD suites that test via HTTP
+     * and never reference Java class or method names.</p>
+     *
+     * <pre>
+     *   createOrder()   domain=order  → any "order" scenario mentions create/add/save/post/submit?
+     *   cancelOrder()   domain=order  → any "order" scenario mentions cancel/delete/remove?
+     *   findOrderById() domain=order  → any "order" scenario mentions find/get/fetch/list/retrieve?
+     * </pre>
+     */
+    private boolean isActionCoveredInBdd(String methodName, String domain, BddQaIndex bddIndex) {
+        List<String> tokens = DeepBddMatcher.splitMethodTokens(methodName);
+        if (tokens.isEmpty()) return false;
+
+        String actionVerb = tokens.get(0);                           // e.g. "create"
+        Set<String> synonyms = DeepBddMatcher.verbSynonymGroup(actionVerb); // e.g. {create,add,save,post…}
+        String domainLower = domain.toLowerCase(Locale.ROOT);
+
+        // Check scenarios that mention this domain
+        boolean coveredByScenario = bddIndex.scenarios().stream()
+                .filter(s -> domainLower.isBlank() || s.allText().contains(domainLower))
+                .anyMatch(s -> {
+                    String text = s.allText();
+                    return synonyms.stream().anyMatch(text::contains);
+                });
+        if (coveredByScenario) return true;
+
+        // Check step defs whose annotation or body mentions this domain
+        return bddIndex.stepDefs().stream()
+                .filter(sd -> domainLower.isBlank()
+                        || sd.pattern().toLowerCase(Locale.ROOT).contains(domainLower)
+                        || sd.body().toLowerCase(Locale.ROOT).contains(domainLower))
+                .anyMatch(sd -> {
+                    String combined = (sd.pattern() + " " + sd.body()).toLowerCase(Locale.ROOT);
+                    return synonyms.stream().anyMatch(combined::contains);
+                });
     }
 
     // ── QA Index ──────────────────────────────────────────────────────────
@@ -362,23 +464,42 @@ public class StaticCoverageAnalyser {
     // ── Explanation & suggestions ─────────────────────────────────────────
 
     private String buildExplanation(ParsedClass cls, List<String> covered, List<String> missed,
-                                    List<String> qaFiles, boolean hasEdgeCases, BddQaIndex bddIndex) {
+                                    List<String> qaFiles, boolean hasEdgeCases, BddQaIndex bddIndex,
+                                    String domain, long domainScenarioCount) {
         StringBuilder sb = new StringBuilder();
-        sb.append(covered.size()).append(" of ").append(covered.size() + missed.size())
-          .append(" public methods have BDD coverage via ").append(String.join(", ", qaFiles)).append(". ");
-        if (!missed.isEmpty()) {
-            sb.append("No Gherkin scenario or step def covers: ").append(String.join(", ", missed)).append(". ");
+
+        // Domain-level summary
+        if (!domain.isBlank()) {
+            sb.append("BDD suite has ").append(domainScenarioCount)
+              .append(" scenario(s) covering the '").append(domain).append("' business domain. ");
         }
+        if (!qaFiles.isEmpty()) {
+            sb.append("Relevant QA files: ").append(String.join(", ", qaFiles)).append(". ");
+        }
+
+        // Action-level coverage summary
+        int total = covered.size() + missed.size();
+        sb.append(covered.size()).append(" of ").append(total)
+          .append(" public method actions are exercised in BDD via domain+action matching");
+        if (covered.size() == total) {
+            sb.append(" (all actions covered)");
+        } else if (!missed.isEmpty()) {
+            sb.append("; no BDD scenario covers the '").append(domain).append("' domain with actions: ")
+              .append(missed.stream()
+                      .map(sig -> sig.substring(0, sig.contains("(") ? sig.indexOf("(") : sig.length()))
+                      .collect(Collectors.joining(", ")));
+        }
+        sb.append(". ");
+
+        // Edge case summary
         if (hasEdgeCases) {
-            sb.append("BDD suite includes edge/failure scenarios (").append(bddIndex.tagsSummary()).append("). ");
+            sb.append("Edge/failure scenarios ARE present for the '").append(domain)
+              .append("' domain (tags: ").append(bddIndex.tagsSummary()).append("). ");
         } else {
-            sb.append("BDD suite appears to cover only happy-path scenarios — "
-                    + "no @edge-case, @db, @kafka, @http, or @negative tags detected in matched scenarios. ");
+            sb.append("No edge/failure scenarios found for the '").append(domain)
+              .append("' domain — only happy-path coverage detected. ");
         }
-        // Tag summary
-        if (!bddIndex.allTags().isEmpty()) {
-            sb.append("All tags in QA suite: ").append(bddIndex.allTags()).append(".");
-        }
+
         return sb.toString();
     }
 
@@ -388,17 +509,6 @@ public class StaticCoverageAnalyser {
         return bddIndex.scenarios().stream()
                 .filter(s -> matchedFileSet.contains(s.filePath()))
                 .anyMatch(FeatureScenario::isEdgeCase);
-    }
-
-    /**
-     * Splits a camelCase method name into lowercase words useful for BDD entity matching.
-     * createOrderItem → ["create", "order", "item"]  (only words ≥ 3 chars)
-     */
-    private String[] splitEntityWords(String methodName) {
-        return Arrays.stream(methodName.split("(?=[A-Z])|(?<=[a-z])(?=[A-Z])"))
-                .map(String::toLowerCase)
-                .filter(w -> w.length() >= 3)
-                .toArray(String[]::new);
     }
 
     private String buildImplNotes(ParsedClass cls) {
