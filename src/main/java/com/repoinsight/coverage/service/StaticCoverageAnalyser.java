@@ -39,6 +39,7 @@ public class StaticCoverageAnalyser {
     private final JavaAstParser            astParser;
     private final TemplateGherkinGenerator gherkinGenerator;
     private final BddQaAnalyser            bddQaAnalyser;
+    private final DeepBddMatcher           deepBddMatcher;
 
     private static final Set<String> NO_NEED_LAYERS = Set.of("DTO", "ENTITY", "CONFIG", "EXCEPTION");
     private static final Set<String> NO_NEED_ANNOTATIONS = Set.of("Configuration", "ConfigurationProperties", "SpringBootApplication");
@@ -146,10 +147,19 @@ public class StaticCoverageAnalyser {
         List<String> missed   = new ArrayList<>();
 
         for (ParsedMethod method : publicMethods) {
-            boolean mentioned = isMethodMentioned(method.getName(), qaContent)
-                    || bddIndex.stepDefCalls(method.getName())
-                    || !bddIndex.scenariosMatching(
-                            splitEntityWords(method.getName())).isEmpty();
+            // Tier 1 — fast exact / synonym check on raw QA file content
+            boolean mentioned = isMethodMentioned(method.getName(), qaContent);
+
+            // Tier 2 — deep semantic matching across ALL BDD scenarios + step defs
+            //           covers cases like BDD "validate xyz" → dev method validateXayz
+            if (!mentioned) {
+                mentioned = deepBddMatcher.matches(method.getName(), bddIndex);
+                if (mentioned) {
+                    log.debug("DeepBddMatcher matched method '{}' in class '{}'",
+                            method.getName(), cls.getSimpleName());
+                }
+            }
+
             if (mentioned) covered.add(method.signature());
             else           missed.add(method.signature());
         }
@@ -327,24 +337,9 @@ public class StaticCoverageAnalyser {
         return false;
     }
 
+    /** Delegates to the canonical synonym table in {@link DeepBddMatcher}. */
     private static Set<String> verbSynonymGroup(String verb) {
-        if (verb.equals("create") || verb.equals("add") || verb.equals("place")
-                || verb.equals("submit") || verb.equals("register") || verb.equals("save"))
-            return Set.of("create", "add", "place", "submit", "register", "save", "new", "post");
-        if (verb.equals("get") || verb.equals("find") || verb.equals("fetch")
-                || verb.equals("load") || verb.equals("retrieve") || verb.equals("list"))
-            return Set.of("get", "find", "fetch", "load", "retrieve", "list", "read", "view", "show");
-        if (verb.equals("update") || verb.equals("edit") || verb.equals("modify") || verb.equals("change"))
-            return Set.of("update", "edit", "modify", "change", "put", "patch");
-        if (verb.equals("delete") || verb.equals("remove") || verb.equals("cancel") || verb.equals("archive"))
-            return Set.of("delete", "remove", "cancel", "archive", "destroy");
-        if (verb.equals("send") || verb.equals("publish") || verb.equals("emit") || verb.equals("dispatch"))
-            return Set.of("send", "publish", "emit", "dispatch", "notify", "produce");
-        if (verb.equals("validate") || verb.equals("check") || verb.equals("verify"))
-            return Set.of("validate", "check", "verify", "assert");
-        if (verb.equals("process") || verb.equals("handle") || verb.equals("execute"))
-            return Set.of("process", "handle", "execute", "run", "perform");
-        return Set.of(verb);
+        return DeepBddMatcher.verbSynonymGroup(verb);
     }
 
     private static String[] splitCamel(String name) {

@@ -73,6 +73,46 @@ public class CoverageComparisonAgent {
             Step definition files bridge Gherkin → Java.  Always check whether a step def
             method body directly calls or instantiates the dev class under review.
 
+            SEMANTIC / FUZZY MATCHING — CRITICAL
+            ─────────────────────────────────────
+            BDD step text and Java method names rarely use identical words.
+            You MUST apply the following matching signals before concluding no coverage:
+
+            1. Verb synonyms — treat these groups as equivalent:
+               • create / add / insert / save / register / post / build / make / generate
+               • get / find / fetch / load / retrieve / list / view / show / search / query
+               • update / edit / modify / change / patch / alter / amend
+               • delete / remove / cancel / archive / destroy / purge / revoke
+               • validate / check / verify / assert / inspect / confirm / ensure
+               • process / handle / execute / run / perform / apply / invoke
+               • send / publish / emit / dispatch / notify / produce / broadcast
+
+            2. CamelCase decomposition — split method names into component words.
+               Example: validateXayz → ["validate", "xayz"]
+               Then look for EACH word (or a close variant) in BDD text.
+
+            3. Edit-distance tolerance — treat words as matching when they differ
+               by ≤ 1 character insertion/deletion/substitution.
+               Example: "xayz" and "xyz" differ by 1 insertion → they MATCH.
+
+            4. Subsequence matching — if all characters of one word appear in
+               order within another word (gaps allowed), count it as a match.
+               Example: "xyz" is a subsequence of "xayz" → MATCH.
+
+            5. Stemming — "validates", "validating", "validated" all share the
+               stem "validat" → treat them as the same word.
+
+            6. Entity derivation — strip layer suffixes to find the business entity:
+               OrderService → "order" | PaymentController → "payment"
+               Then search for that entity word across ALL scenarios and step defs.
+
+            Practical example you MUST handle correctly:
+              BDD step: "When the system validates the xyz configuration"
+              Dev method: validateXayz()
+              → verb "validate" synonym-matches → 40 pts
+              → entity token "xayz" vs "xyz": edit distance = 1 → 10 pts
+              → Total score 50 → this IS covered; do NOT mark as MISSED.
+
             Tags to recognise:
               @smoke @regression → broad coverage, likely happy path only
               @edge-case @negative @sad-path @failure → failure / boundary scenarios
