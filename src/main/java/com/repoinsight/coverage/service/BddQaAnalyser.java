@@ -31,6 +31,20 @@ public class BddQaAnalyser {
             "@(?:Given|When|Then|And|But)\\s*\\(\\s*[\"'](.*?)[\"']\\s*\\)", Pattern.DOTALL);
     private static final Pattern METHOD_CALL_PAT = Pattern.compile("\\.(\\w+)\\s*\\(");
 
+    // HTTP endpoint extraction from BDD step text and REST Assured bodies
+    // Matches: POST "/api/orders", GET /api/users/1, send a DELETE request to "/api/x"
+    private static final Pattern STEP_HTTP_QUOTED = Pattern.compile(
+            "\\b(GET|POST|PUT|PATCH|DELETE)\\b[^\"'/]*[\"'](/[\\w{}/._?=&-]+)[\"']",
+            Pattern.CASE_INSENSITIVE);
+    // Matches: POST to /api/orders  (unquoted)
+    private static final Pattern STEP_HTTP_UNQUOTED = Pattern.compile(
+            "\\b(GET|POST|PUT|PATCH|DELETE)\\b\\s+(?:to\\s+|request\\s+to\\s+)?(/[\\w{}/._?=&-]{2,})",
+            Pattern.CASE_INSENSITIVE);
+    // Matches REST Assured chained calls: .post("/path")  .get("/path")
+    private static final Pattern REST_ASSURED_CALL = Pattern.compile(
+            "\\.(?i)(post|get|put|delete|patch)\\s*\\([\"']([^\"'\\s]+)[\"']",
+            Pattern.CASE_INSENSITIVE);
+
     // ── Public entry point ─────────────────────────────────────────────────
 
     public BddQaIndex buildIndex(List<GitHubFile> qaFiles) {
@@ -338,6 +352,57 @@ public class BddQaAnalyser {
             return scenarios.stream().filter(s -> s.allText().contains(dl)).toList();
         }
 
+        // ── HTTP endpoint coverage (REST Assured + Cucumber) ───────────────
+
+        /**
+         * Extracts all HTTP endpoints covered by the BDD suite.
+         *
+         * <p>Scans three text surfaces:
+         * <ol>
+         *   <li>Gherkin step lines — {@code When I send a POST request to "/api/orders"}</li>
+         *   <li>Step-def annotation patterns — {@code @When(".*POST.*\"/api/orders\".*")}</li>
+         *   <li>Step-def method bodies — REST Assured chains: {@code .post("/api/orders")}</li>
+         * </ol>
+         */
+        public Set<CoveredEndpoint> coveredEndpoints() {
+            Set<CoveredEndpoint> endpoints = new LinkedHashSet<>();
+            // Feature file steps
+            scenarios.forEach(s ->
+                    s.steps().forEach(step -> extractEndpoints(step, endpoints)));
+            // Step def patterns + bodies
+            stepDefs.forEach(sd -> {
+                extractEndpoints(sd.pattern(), endpoints);
+                extractEndpointsFromBody(sd.body(), endpoints);
+            });
+            return endpoints;
+        }
+
+        /** True when the BDD suite has a covered endpoint matching the given HTTP verb and path. */
+        public boolean coversEndpoint(String httpMethod, String fullPath) {
+            return coveredEndpoints().stream()
+                    .anyMatch(ep -> ep.matches(httpMethod, fullPath));
+        }
+
+        private static void extractEndpoints(String text, Set<CoveredEndpoint> out) {
+            if (text == null || text.isBlank()) return;
+            Matcher m1 = STEP_HTTP_QUOTED.matcher(text);
+            while (m1.find())
+                out.add(new CoveredEndpoint(m1.group(1).toUpperCase(Locale.ROOT), m1.group(2)));
+            Matcher m2 = STEP_HTTP_UNQUOTED.matcher(text);
+            while (m2.find())
+                out.add(new CoveredEndpoint(m2.group(1).toUpperCase(Locale.ROOT), m2.group(2)));
+        }
+
+        private static void extractEndpointsFromBody(String body, Set<CoveredEndpoint> out) {
+            if (body == null || body.isBlank()) return;
+            Matcher m = REST_ASSURED_CALL.matcher(body);
+            while (m.find()) {
+                String verb = m.group(1).toUpperCase(Locale.ROOT);
+                String path = m.group(2);
+                if (path.startsWith("/")) out.add(new CoveredEndpoint(verb, path));
+            }
+        }
+
         /**
          * Produces a concise human-readable summary for use in LLM prompts.
          * Passed as stable QA pre-analysis context before dev class batches.
@@ -368,7 +433,56 @@ public class BddQaAnalyser {
                     sb.append("  → ").append(sd.pattern()).append("\n"));
 
             sb.append("\nAll tags: ").append(allTags()).append("\n");
+
+            // Covered HTTP endpoints (critical for REST Assured + Cucumber repos)
+            Set<CoveredEndpoint> endpoints = coveredEndpoints();
+            if (!endpoints.isEmpty()) {
+                sb.append("\nCovered HTTP endpoints (").append(endpoints.size()).append("):\n");
+                endpoints.stream().limit(40)
+                        .forEach(ep -> sb.append("  ").append(ep.httpMethod())
+                                .append(" ").append(ep.path()).append("\n"));
+            }
             return sb.toString();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CoveredEndpoint
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * An HTTP endpoint found in BDD step text or REST Assured body calls.
+     *
+     * <p>Path normalisation replaces concrete IDs with {@code {id}} so that
+     * {@code /api/orders/123} matches {@code /api/orders/{id}}.</p>
+     */
+    public record CoveredEndpoint(String httpMethod, String path) {
+
+        /** Normalised path: concrete numeric IDs and named path variables → {@code {id}}. */
+        public String normalizedPath() {
+            return path
+                    .replaceAll("\\{[^}]+\\}", "{id}")   // {orderId} → {id}
+                    .replaceAll("/\\d+", "/{id}")         // /123 → /{id}
+                    .replaceAll("/$", "");                // trailing slash
+        }
+
+        /**
+         * True when this endpoint covers the given HTTP method + path.
+         * Handles path-param variations and base-path prefix differences.
+         */
+        public boolean matches(String method, String otherPath) {
+            if (!httpMethod.equalsIgnoreCase(method)) return false;
+            String thisNorm  = normalizedPath().toLowerCase(Locale.ROOT);
+            String otherNorm = otherPath
+                    .replaceAll("\\{[^}]+\\}", "{id}")
+                    .replaceAll("/\\d+", "/{id}")
+                    .replaceAll("/$", "")
+                    .toLowerCase(Locale.ROOT);
+            // Exact match, or one path is a suffix of the other
+            // (handles /api/v1/orders matching /orders when base path differs)
+            return thisNorm.equals(otherNorm)
+                    || thisNorm.endsWith(otherNorm)
+                    || otherNorm.endsWith(thisNorm);
         }
     }
 }

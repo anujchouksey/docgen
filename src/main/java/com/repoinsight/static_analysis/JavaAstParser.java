@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
 
 /**
  * Converts raw Java source (from GitHub) into ParsedClass domain objects
@@ -43,6 +44,15 @@ public class JavaAstParser {
         }
     }
 
+    // HTTP verb → annotation name mapping
+    private static final Map<String, String> MAPPING_ANNOTATIONS = Map.of(
+            "GetMapping",    "GET",
+            "PostMapping",   "POST",
+            "PutMapping",    "PUT",
+            "DeleteMapping", "DELETE",
+            "PatchMapping",  "PATCH"
+    );
+
     private ParsedClass buildParsedClass(CompilationUnit cu, TypeDeclaration<?> type, String filePath) {
         String pkg = cu.getPackageDeclaration().map(p -> p.getName().asString()).orElse("");
         String name = type.getNameAsString();
@@ -61,6 +71,11 @@ public class JavaAstParser {
             superClass = cid.getExtendedTypes().isEmpty() ? null
                     : cid.getExtendedTypes().get(0).getNameAsString();
         }
+
+        // Extract class-level base HTTP path from @RequestMapping (common on controllers)
+        String baseHttpPath = type.getAnnotationByName("RequestMapping")
+                .map(this::extractAnnotationPath)
+                .orElse(null);
 
         List<ParsedField> fields = type.getFields().stream()
                 .flatMap(fd -> fd.getVariables().stream().map(v -> ParsedField.builder()
@@ -90,6 +105,7 @@ public class JavaAstParser {
                 .isInterface(isInterface)
                 .isAbstract(isAbstract)
                 .isEnum(isEnum)
+                .baseHttpPath(baseHttpPath)
                 .build();
     }
 
@@ -112,6 +128,23 @@ public class JavaAstParser {
                     .distinct().toList();
         }
 
+        // Extract HTTP mapping annotation (GetMapping, PostMapping, etc.)
+        String httpMethod = null;
+        String httpPath   = null;
+        for (AnnotationExpr ann : md.getAnnotations()) {
+            String annName = ann.getNameAsString();
+            String verb = MAPPING_ANNOTATIONS.get(annName);
+            if (verb == null && "RequestMapping".equals(annName)) {
+                // @RequestMapping(method = RequestMethod.POST, value = "/path")
+                verb = extractRequestMappingVerb(ann);
+            }
+            if (verb != null) {
+                httpMethod = verb;
+                httpPath   = extractAnnotationPath(ann);
+                break;
+            }
+        }
+
         return ParsedMethod.builder()
                 .name(md.getNameAsString())
                 .returnType(md.getType().asString())
@@ -121,7 +154,52 @@ public class JavaAstParser {
                 .calledClasses(calledClasses)
                 .isPublic(md.isPublic())
                 .isStatic(md.isStatic())
+                .httpMethod(httpMethod)
+                .httpPath(httpPath)
                 .build();
+    }
+
+    /**
+     * Extracts the URL path value from a mapping annotation.
+     * Handles: @GetMapping("/path"), @PostMapping(value="/path"),
+     *          @RequestMapping(value={"/path"}, method=…)
+     */
+    private String extractAnnotationPath(AnnotationExpr ann) {
+        if (ann instanceof SingleMemberAnnotationExpr smae) {
+            return stripQuotesAndBraces(smae.getMemberValue().toString());
+        }
+        if (ann instanceof NormalAnnotationExpr nae) {
+            return nae.getPairs().stream()
+                    .filter(p -> "value".equals(p.getNameAsString()) || "path".equals(p.getNameAsString()))
+                    .findFirst()
+                    .map(p -> stripQuotesAndBraces(p.getValue().toString()))
+                    .orElse("/");
+        }
+        return "/";
+    }
+
+    /** Extracts RequestMethod.GET/POST/… from @RequestMapping(method = RequestMethod.POST). */
+    private String extractRequestMappingVerb(AnnotationExpr ann) {
+        if (ann instanceof NormalAnnotationExpr nae) {
+            return nae.getPairs().stream()
+                    .filter(p -> "method".equals(p.getNameAsString()))
+                    .findFirst()
+                    .map(p -> {
+                        String v = p.getValue().toString().toUpperCase();
+                        if (v.contains("POST"))   return "POST";
+                        if (v.contains("PUT"))    return "PUT";
+                        if (v.contains("DELETE")) return "DELETE";
+                        if (v.contains("PATCH"))  return "PATCH";
+                        return "GET";
+                    })
+                    .orElse(null); // no method attribute → not a simple verb mapping
+        }
+        return null;
+    }
+
+    /** Strips surrounding quotes, array braces, and whitespace from annotation values. */
+    private String stripQuotesAndBraces(String raw) {
+        return raw.replaceAll("[{}\"]", "").trim();
     }
 
     private String detectLayer(List<String> annotations, String name, String superClass, List<String> interfaces) {

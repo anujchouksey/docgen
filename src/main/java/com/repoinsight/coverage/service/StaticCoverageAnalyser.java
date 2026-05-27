@@ -2,6 +2,7 @@ package com.repoinsight.coverage.service;
 
 import com.repoinsight.coverage.model.*;
 import com.repoinsight.coverage.service.BddQaAnalyser.BddQaIndex;
+import com.repoinsight.coverage.service.BddQaAnalyser.CoveredEndpoint;
 import com.repoinsight.coverage.service.BddQaAnalyser.FeatureScenario;
 import com.repoinsight.github.model.GitHubFile;
 import com.repoinsight.static_analysis.JavaAstParser;
@@ -176,33 +177,56 @@ public class StaticCoverageAnalyser {
                     .build();
         }
 
-        // ── Stage 2: action-level method coverage ──────────────────────────
-        // Domain IS covered by BDD.  For each public method check whether the
-        // ACTION it performs (its leading verb) is covered in domain scenarios.
+        // ── Stage 2: per-method coverage ───────────────────────────────────
+        // Three tiers in descending specificity:
         //
-        // createOrder()  → action=create  → any "order" BDD scenario mentions create/add/save/post?
-        // cancelOrder()  → action=cancel  → any "order" BDD scenario mentions cancel/delete/remove?
-        // findOrderById()→ action=find    → any "order" BDD scenario mentions find/get/fetch/list?
+        // Tier A — HTTP endpoint match (CONTROLLER layer, REST Assured + Cucumber)
+        //   @PostMapping("/api/orders") in dev + "POST /api/orders" in BDD → COVERED
+        //   This is the most accurate signal for REST API E2E test suites.
         //
-        // Method names are NEVER looked up in BDD text directly.
+        // Tier B — Domain + action verb match (all layers)
+        //   createOrder() → action=create, domain=order → any "order" BDD scenario mentions create?
+        //   Works even when BDD uses plain English ("place an order", "submit order").
+        //
+        // Tier C — Fallbacks (raw content + deep semantic matcher)
+        //   For unusual naming or direct method references in step defs.
         Set<String> qaContent = qaIndex.contentOf(matchedQaFiles);
+        Set<CoveredEndpoint> bddEndpoints = bddIndex.coveredEndpoints();
+        String baseHttpPath = cls.getBaseHttpPath() != null ? cls.getBaseHttpPath() : "";
+
         List<String> covered  = new ArrayList<>();
         List<String> missed   = new ArrayList<>();
 
         for (ParsedMethod method : publicMethods) {
-            boolean actionCovered =
-                    // Primary: domain + action verb match in BDD (E2E-compatible)
-                    isActionCoveredInBdd(method.getName(), domain, bddIndex)
-                    // Fallback A: raw QA file content (step defs that directly call this method)
-                    || isMethodMentioned(method.getName(), qaContent)
-                    // Fallback B: deep semantic name matching (handles fuzzy variants)
-                    || deepBddMatcher.matches(method.getName(), bddIndex);
+            boolean actionCovered = false;
+
+            // Tier A: HTTP endpoint matching (primary for controllers)
+            if (method.isRestEndpoint()) {
+                String fullPath = combinePaths(baseHttpPath, method.getHttpPath());
+                actionCovered = bddEndpoints.stream()
+                        .anyMatch(ep -> ep.matches(method.getHttpMethod(), fullPath));
+                if (actionCovered) {
+                    log.debug("Endpoint match: {} {} → {} in '{}'",
+                            method.getHttpMethod(), fullPath, method.getName(), cls.getSimpleName());
+                }
+            }
+
+            // Tier B: domain + action verb match
+            if (!actionCovered) {
+                actionCovered = isActionCoveredInBdd(method.getName(), domain, bddIndex);
+            }
+
+            // Tier C: raw QA content + deep semantic matcher
+            if (!actionCovered) {
+                actionCovered = isMethodMentioned(method.getName(), qaContent)
+                        || deepBddMatcher.matches(method.getName(), bddIndex);
+            }
 
             if (actionCovered) {
                 covered.add(method.signature());
             } else {
                 missed.add(method.signature());
-                log.debug("Action not found in BDD: method='{}' domain='{}' class='{}'",
+                log.debug("Not covered: method='{}' domain='{}' class='{}'",
                         method.getName(), domain, cls.getSimpleName());
             }
         }
@@ -442,6 +466,19 @@ public class StaticCoverageAnalyser {
     /** Delegates to the canonical synonym table in {@link DeepBddMatcher}. */
     private static Set<String> verbSynonymGroup(String verb) {
         return DeepBddMatcher.verbSynonymGroup(verb);
+    }
+
+    /**
+     * Combines a controller base path with a method-level path.
+     * {@code "/api/orders"} + {@code "/{id}"} → {@code "/api/orders/{id}"}
+     */
+    private static String combinePaths(String base, String method) {
+        if (base == null || base.isBlank()) return method != null ? method : "/";
+        if (method == null || method.isBlank() || method.equals("/")) return base;
+        // Avoid double slashes
+        String b = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        String m = method.startsWith("/") ? method : "/" + method;
+        return b + m;
     }
 
     private static String[] splitCamel(String name) {

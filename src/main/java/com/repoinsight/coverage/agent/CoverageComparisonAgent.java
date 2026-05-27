@@ -50,17 +50,34 @@ public class CoverageComparisonAgent {
 
             FUNDAMENTAL PRINCIPLE — READ THIS FIRST
             ────────────────────────────────────────
-            The QA repo is an E2E / functional BDD test suite that tests the API through HTTP.
-            It does NOT import, instantiate, or call any class from the dev repo directly.
-            Step definitions make HTTP calls (REST Assured, WebClient, Karate, etc.).
+            The QA repo is a REST Assured + Cucumber BDD test suite.
+            Step definitions make HTTP calls (.post("/api/orders"), .get("/api/users/{id}")).
+            They do NOT import, instantiate, or call any class from the dev repo directly.
 
             This means:
             • Java METHOD NAMES from the dev repo will NEVER appear in BDD text. That is normal.
-            • A single BDD scenario "When I POST to /api/orders" exercises the ENTIRE request
-              chain: OrderController → OrderService → OrderRepository → any event producers.
+            • A single BDD scenario "When I send a POST request to /api/orders" exercises the
+              ENTIRE request chain: OrderController → OrderService → OrderRepository → Kafka.
               All classes in that chain are covered by that one scenario.
             • You must NEVER mark a class MISSED simply because its method names don't appear
               in BDD step text. That is the wrong test.
+
+            COMMON REST ASSURED + CUCUMBER PATTERNS TO RECOGNISE
+            ──────────────────────────────────────────────────────
+            Feature file steps (extract HTTP verb + path):
+              "When I send a POST request to \"/api/orders\""     → POST /api/orders
+              "When I call GET \"/api/users/{id}\""               → GET /api/users/{id}
+              "When I make a DELETE request to \"/api/orders/1\"" → DELETE /api/orders/1
+              "Given the client sends PUT to \"/api/orders/1\""   → PUT /api/orders/1
+
+            Step def bodies (REST Assured chains):
+              given().when().post("/api/orders")                  → POST /api/orders
+              RestAssured.given().get("/api/users/" + id)         → GET /api/users/{id}
+              requestSpec.put("/api/orders/" + orderId)          → PUT /api/orders/{id}
+
+            Match these extracted endpoints to Spring Boot controller annotations:
+              @PostMapping("/api/orders")   in OrderController → POST /api/orders covered
+              @GetMapping("/api/orders/{id}") → GET /api/orders/{id} covered (path param = any)
 
             THE CORRECT QUESTION TO ASK FOR EACH CLASS
             ────────────────────────────────────────────
@@ -210,6 +227,14 @@ public class CoverageComparisonAgent {
         String bddSummary   = bddIndex.toLlmSummary();
         log.info("BDD index: {} scenarios, {} step defs, tags: {}",
                 bddIndex.scenarios().size(), bddIndex.stepDefs().size(), bddIndex.tagsSummary());
+
+        // Log extracted HTTP endpoints so they're visible in application logs
+        var endpoints = bddIndex.coveredEndpoints();
+        log.info("BDD HTTP endpoints extracted: {} — e.g. {}",
+                endpoints.size(),
+                endpoints.stream().limit(5)
+                        .map(ep -> ep.httpMethod() + " " + ep.path())
+                        .toList());
 
         // Build raw QA context (full file content for detailed matching)
         String qaRawContext = buildQaRawContext(qaFiles);

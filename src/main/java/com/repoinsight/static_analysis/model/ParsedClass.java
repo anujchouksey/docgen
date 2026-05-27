@@ -21,4 +21,11 @@ public class ParsedClass {
     boolean isInterface;
     boolean isAbstract;
     boolean isEnum;
+
+    /**
+     * Base HTTP path from a class-level {@code @RequestMapping} annotation,
+     * e.g. {@code "/api/orders"}.  Null when no class-level mapping is present.
+     * Combine with each method's {@code httpPath} for the full endpoint path.
+     */
+    String baseHttpPath;
 }

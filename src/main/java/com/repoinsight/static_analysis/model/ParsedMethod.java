@@ -17,7 +17,27 @@ public class ParsedMethod {
     boolean isPublic;
     boolean isStatic;
 
+    /**
+     * HTTP verb extracted from @GetMapping / @PostMapping / @PutMapping /
+     * @DeleteMapping / @PatchMapping / @RequestMapping annotations.
+     * Null when this method is not a REST endpoint.
+     */
+    String httpMethod;   // "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | null
+
+    /**
+     * URL path from the mapping annotation, e.g. {@code "/orders/{id}"}.
+     * Does NOT include the class-level base path — combine with
+     * {@link com.repoinsight.static_analysis.model.ParsedClass#getBaseHttpPath()}
+     * to get the full path.  Null when not a REST endpoint.
+     */
+    String httpPath;
+
     public String signature() {
         return name + "(" + String.join(", ", parameterTypes) + ")";
+    }
+
+    /** True when this method is mapped to an HTTP endpoint. */
+    public boolean isRestEndpoint() {
+        return httpMethod != null && !httpMethod.isBlank();
     }
 }
